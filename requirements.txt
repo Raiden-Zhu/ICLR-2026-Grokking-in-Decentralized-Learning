@@ -1,0 +1,13 @@
+numpy>=1.21.0
+torch>=2.4.0
+wandb>=0.12.0
+scikit-learn
+tqdm
+fire
+torchvision
+timm
+matplotlib
+seaborn
+open-clip-torch
+PyYAML
+huggingface_hub

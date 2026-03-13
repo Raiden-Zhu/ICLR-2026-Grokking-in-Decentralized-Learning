@@ -1,0 +1,38 @@
+run:
+  entry: main_multi_GPU.py
+  python: python3
+
+env:
+  HF_ENDPOINT: https://hf-mirror.com
+  HF_HOME: ./cache/hf_home
+  OPENCLIP_CACHE_DIR: ./cache/hf_home
+
+args:
+  dataset_path: datasets/downloads
+  dataset_name: tinyimagenet
+  model_name: resnet18
+  image_size: 64
+  pretrained: false
+  optimizer_name: sgd
+  lr: 0.01
+  amp_enabled: true
+  amp_dtype: bf16
+  alpha: 0.1
+  data_sampling_mode: resample
+  node_datasize: 512
+  gossip_topology: random
+  r_schedule: truncate_v2
+  r_start: 0.2
+  r_end: 31
+  num_nodes: 32
+  num_GPU: 4
+  k_steps: 100
+  max_steps: 30000
+  batch_size: 128
+  weight_decay: 0.0005
+  nonIID: true
+  window_size: 0.05
+  point1: 0.9
+  lr_scheduler: none
+  post_merge_rounds: 0
+  seed: 72

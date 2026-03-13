@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: "If you use this repository, please cite the paper below."
+title: "On The Surprising Effectiveness of a Single Global Merging in Decentralized Learning"
+type: software
+authors:
+  - family-names: Zhu
+    given-names: Tongtian
+  - family-names: Zhang
+    given-names: Tianyu
+  - family-names: Wang
+    given-names: Mingze
+  - family-names: Zhou
+    given-names: Zhanpeng
+  - family-names: Wang
+    given-names: Can
+preferred-citation:
+  type: conference-paper
+  title: "On The Surprising Effectiveness of a Single Global Merging in Decentralized Learning"
+  authors:
+    - family-names: Zhu
+      given-names: Tongtian
+    - family-names: Zhang
+      given-names: Tianyu
+    - family-names: Wang
+      given-names: Mingze
+    - family-names: Zhou
+      given-names: Zhanpeng
+    - family-names: Wang
+      given-names: Can
+  year: 2026
+  booktitle: "The Fourteenth International Conference on Learning Representations"
+  url: "https://openreview.net/forum?id=zrFnwRHuQo"

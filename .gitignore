@@ -1,0 +1,44 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Build artifacts
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Project outputs and runtime files
+outputs/
+checkpoints/
+logs/
+cache/
+wandb/
+
+# Data and model artifacts
+datasets/downloads/
+*.pt
+*.pth
+
+# Secrets and local env files
+.env
+.env.local
+.env.*.local
+
+# IDE/editor
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db

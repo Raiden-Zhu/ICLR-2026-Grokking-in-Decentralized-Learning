@@ -31,6 +31,8 @@ cp .env.example .env
 bash scripts/preflight.sh
 ```
 
+The env helpers now read `.env` and `.env.local` as restricted `KEY=VALUE` files instead of sourcing them as shell scripts.
+
 If needed, log into optional services:
 
 ```bash
@@ -44,7 +46,7 @@ bash scripts/login_hf.sh
 python3 scripts/run_with_config.py --config configs/examples/smoke_test_1gpu_1000steps.yaml
 ```
 
-This is the safest first run because it checks the dataset path, launcher path, and basic training loop before a longer experiment.
+This is the safest first run because it checks the dataset path, launcher path, and basic training loop before a longer experiment. The launcher also normalizes compatibility aliases such as `num_gpus`/`num_GPU` and `non_iid`/`nonIID` before dispatching to the training entrypoint.
 
 ### 3. Launch a paper-oriented run
 
@@ -197,6 +199,16 @@ Recommended preset for this behavior:
 
 - configs/examples/topology_exponential_random.yaml
 
+## TinyImageNet Notes
+
+For TinyImageNet runs, the repository now treats dataset preparation as part of the reproducibility boundary:
+
+- downloads and archive extraction are handled through the hardened `datasets/tinyimagenet.py` path
+- processed caches no longer rely on the old external pickle-based path that motivated the original review item
+- `strict_loading` and `max_failure_ratio` are the main controls for how corrupted samples are handled during dataset loading
+
+If you are reproducing older local commands or YAMLs, note that `load_pickle` is still accepted as a compatibility input but does not change current training behavior.
+
 ## Reproducibility Checklist
 
 For runs that you want to compare carefully, record the following:
@@ -216,6 +228,7 @@ A standard run can produce the following artifacts:
 
 - W&B metrics, if logging is enabled
 - cached datasets and model downloads under local cache directories
+- a final `convergence_model_multi_gpu.pth` checkpoint reconstructed from the shared target state at the end of training
 
 ## Practical Advice
 

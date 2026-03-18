@@ -17,6 +17,13 @@ from models.clip_vit import get_CLIPclassification_model
 from models.mlp import create_mlp
 
 
+CLIP_MODEL_NAMES = {
+    "clip_pretrained_vit_b_32_cifar100",
+    "clip_vit",
+    "clip_vit_frozen",
+}
+
+
 def _create_mlp_model(pretrained=False, input_size=12288, num_classes=200, **kwargs):
     mlp_defaults = {
         "hidden_sizes": [4096, 2048, 1024],
@@ -27,44 +34,61 @@ def _create_mlp_model(pretrained=False, input_size=12288, num_classes=200, **kwa
     return create_mlp(input_size=input_size, num_classes=num_classes, **mlp_defaults)
 
 
+def _resolve_clip_model_name(model_name, pretrained):
+    # OpenCLIP warns when OpenAI ViT-B-32 weights are loaded into a non-quickgelu config.
+    # Keep user overrides intact; only apply the safer default upgrade path.
+    if model_name == "ViT-B-32" and bool(pretrained):
+        return "ViT-B-32-quickgelu"
+    return model_name
+
+
 def _create_clip_model(
     pretrained=False,
     model_name="ViT-B-32",
     freeze_clip=False,
+    schema_only=False,
     **kwargs,
 ):
     num_classes = kwargs.pop("num_classes", 200)
-
-    # OpenCLIP warns when OpenAI ViT-B-32 weights are loaded into a non-quickgelu config.
-    # Keep user overrides intact; only apply the safer default upgrade path.
-    if model_name == "ViT-B-32" and bool(pretrained):
-        model_name = "ViT-B-32-quickgelu"
+    resolved_model_name = _resolve_clip_model_name(model_name, pretrained)
+    effective_pretrained = None if schema_only else pretrained
 
     return get_CLIPclassification_model(
-        model_name=model_name,
+        model_name=resolved_model_name,
         num_classes=num_classes,
         freeze_clip=freeze_clip,
-        pretrained=pretrained,
+        pretrained=effective_pretrained,
         **kwargs,
     )
 
 
-def _create_clip_model_cifar100(pretrained=False, **kwargs):
+def _create_clip_model_cifar100(pretrained=False, schema_only=False, **kwargs):
     kwargs.setdefault("num_classes", 100)
-    return _create_clip_model(pretrained=pretrained, model_name="ViT-B-32", **kwargs)
+    return _create_clip_model(
+        pretrained=pretrained,
+        model_name="ViT-B-32",
+        schema_only=schema_only,
+        **kwargs,
+    )
 
 
-def _create_clip_model_default(pretrained=False, **kwargs):
+def _create_clip_model_default(pretrained=False, schema_only=False, **kwargs):
     kwargs.setdefault("num_classes", 200)
-    return _create_clip_model(pretrained=pretrained, model_name="ViT-B-32", **kwargs)
+    return _create_clip_model(
+        pretrained=pretrained,
+        model_name="ViT-B-32",
+        schema_only=schema_only,
+        **kwargs,
+    )
 
 
-def _create_clip_model_default_frozen(pretrained=False, **kwargs):
+def _create_clip_model_default_frozen(pretrained=False, schema_only=False, **kwargs):
     kwargs.setdefault("num_classes", 200)
     return _create_clip_model(
         pretrained=pretrained,
         model_name="ViT-B-32",
         freeze_clip=True,
+        schema_only=schema_only,
         **kwargs,
     )
 
@@ -96,8 +120,14 @@ MODEL_REGISTRY = {
     }
 
 
-def get_model(model_name, pretrained=False, **model_kwargs):
+def get_model(model_name, pretrained=False, schema_only=False, **model_kwargs):
 
     if model_name not in MODEL_REGISTRY:
         raise ValueError(f"Unsupported model: {model_name}")
-    return MODEL_REGISTRY[model_name](pretrained=pretrained, **model_kwargs)
+
+    factory = MODEL_REGISTRY[model_name]
+    if schema_only and model_name in CLIP_MODEL_NAMES:
+        return factory(pretrained=pretrained, schema_only=True, **model_kwargs)
+    if schema_only:
+        return factory(pretrained=False, **model_kwargs)
+    return factory(pretrained=pretrained, **model_kwargs)

@@ -113,6 +113,8 @@ bash scripts/bootstrap_env.sh
 cp .env.example .env
 ```
 
+The environment helper scripts now expect `.env` and `.env.local` to contain plain `KEY=VALUE` pairs rather than arbitrary shell code.
+
 Optional credential setup:
 
 ```bash
@@ -131,6 +133,8 @@ Smoke test via config:
 ```bash
 python3 scripts/run_with_config.py --config configs/examples/smoke_test_1gpu_1000steps.yaml
 ```
+
+The config launcher is the recommended top-level entrypoint. It normalizes compatibility aliases such as `num_gpus`/`num_GPU` and `non_iid`/`nonIID` before invoking the training entry.
 
 Paper-oriented launcher:
 
@@ -180,11 +184,11 @@ At a high level, the simulator currently works as follows:
 
 1. Split the full set of logical nodes across the requested GPUs.
 2. Train each node locally for a fixed number of local steps.
-3. Synchronize node states.
-4. Materialize the gossip update over all logical nodes.
-5. Broadcast the updated node parameters back to the GPU workers.
+3. Publish local states, aggregate them on the shared rank-0 control path, and broadcast the updated parameters back to workers.
+4. Run evaluation only at the explicit scheduled checkpoints.
+5. Optionally run post-merge gossip rounds and reconstruct the final convergence model on the centralized aggregation device.
 
-This preserves the node-level optimization logic while allowing a small number of GPUs to emulate a larger decentralized system at the level of learning dynamics.
+The barrier protocol for publish, aggregate, reload, and evaluation is kept explicit in the code so refactors do not silently change training-time synchronization semantics.
 
 For implementation-level interpretation of gossip versus global averaging, see [docs/implementation_details.md](docs/implementation_details.md).
 
@@ -205,7 +209,7 @@ For implementation-level interpretation of gossip versus global averaging, see [
 The [scripts](scripts) directory is intentionally small and operational. It is best understood as a thin workflow layer around the main training code rather than as a separate subsystem.
 
 - [scripts/bootstrap_env.sh](scripts/bootstrap_env.sh): bootstrap a local Python environment and install dependencies.
-- [scripts/setup_env.sh](scripts/setup_env.sh): load environment variables from local env files.
+- [scripts/setup_env.sh](scripts/setup_env.sh): load environment variables from local env files using restricted `KEY=VALUE` parsing.
 - [scripts/preflight.sh](scripts/preflight.sh): basic checks before a long run.
 - [scripts/run_with_config.py](scripts/run_with_config.py): the main config-driven launcher.
 - [scripts/run_main_experiment.sh](scripts/run_main_experiment.sh): thin wrapper around the paper-oriented config.
@@ -216,6 +220,11 @@ The [scripts](scripts) directory is intentionally small and operational. It is b
 ## Main Controls
 
 The most important simulator controls are:
+
+Compatibility notes:
+- `num_GPU` is the canonical training key; `num_gpus` is accepted as a compatibility alias.
+- `nonIID` is the canonical training key; `non_iid` is accepted as a compatibility alias.
+- `load_pickle` is only a legacy no-op compatibility input and is not part of the active training semantics.
 
 - `num_nodes`: total number of logical decentralized-learning nodes.
 - `num_GPU`: number of GPU worker processes used to host those nodes.
@@ -258,6 +267,8 @@ The data policy is intentional:
 - Main experiments can consume substantial memory; monitor GPU pressure when scaling node count.
 - AMP defaults to `bf16`; if switched to `fp16`, training uses `GradScaler` automatically.
 - `r_start` and `r_end` are interpreted as extra neighbors, excluding self.
+- TinyImageNet preparation now uses the hardened dataset path in `datasets/tinyimagenet.py`; `strict_loading` and `max_failure_ratio` are the main user-facing controls for corrupted-sample handling.
+- The merged-model path reconstructs parameters on the centralized aggregation device and then refreshes BatchNorm statistics through a short calibration pass.
 - `end_topology` is used only as an optional topology override during post-merge rounds.
 - `data_sampling_mode=fixed` means one weighted subset is drawn once per node; `data_sampling_mode=resample` means the node's class distribution is fixed but concrete sample indices are redrawn over time.
 - For TinyImageNet runs with small images (for example `image_size=64`), the paper-facing default ResNet is `model_name=resnet18_cifar_stem`.

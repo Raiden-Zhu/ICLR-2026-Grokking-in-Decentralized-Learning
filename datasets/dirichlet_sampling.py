@@ -6,7 +6,6 @@ import random
 import time
 import os
 import json
-import pickle
 import hashlib
 from .common import get_dataset_targets
 # from sklearn.model_selection import train_test_split
@@ -266,7 +265,7 @@ class nonIIDSampler(torch.utils.data.Sampler):
         # Use dataset type, length, and class count as the base identifier.
         dataset_name = type(self.dataset).__name__
         dataset_len = len(self.dataset)
-        
+
         # Try to retrieve the dataset root path when available.
         dataset_root = ""
         if hasattr(self.dataset, 'root'):
@@ -278,38 +277,77 @@ class nonIIDSampler(torch.utils.data.Sampler):
         if hasattr(self.dataset, "indices") and self.dataset.indices is not None:
             subset_indices = np.asarray(self.dataset.indices, dtype=np.int64)
             dataset_view = hashlib.md5(subset_indices.tobytes()).hexdigest()[:12]
-        
+
         # Build a stable hash for this dataset view.
         key_string = f"{dataset_name}_{dataset_len}_{self.nb_classes}_{dataset_root}_{dataset_view}"
         hash_key = hashlib.md5(key_string.encode()).hexdigest()[:12]
-        
-        return f"{dataset_name}_{dataset_len}_{self.nb_classes}_{hash_key}.pkl"
-    
+
+        return f"{dataset_name}_{dataset_len}_{self.nb_classes}_{hash_key}.npz"
+
+    def _serialize_class_indices(self):
+        counts = np.asarray([len(indices) for indices in self.class_indices], dtype=np.int64)
+        arrays = [np.asarray(indices, dtype=np.int64) for indices in self.class_indices]
+        flat_indices = (
+            np.concatenate(arrays).astype(np.int64, copy=False)
+            if arrays and any(len(indices) > 0 for indices in arrays)
+            else np.empty((0,), dtype=np.int64)
+        )
+        return counts, flat_indices
+
+    def _deserialize_class_indices(self, counts, flat_indices):
+        counts = np.asarray(counts, dtype=np.int64)
+        flat_indices = np.asarray(flat_indices, dtype=np.int64)
+
+        if counts.ndim != 1 or len(counts) != self.nb_classes:
+            raise ValueError("Cached class_indices has invalid class-count metadata")
+        if np.any(counts < 0):
+            raise ValueError("Cached class_indices contains negative class counts")
+
+        total_indices = int(counts.sum())
+        if total_indices != len(flat_indices):
+            raise ValueError(
+                "Cached class_indices is inconsistent: flat index length does not match counts"
+            )
+
+        class_indices = []
+        start_idx = 0
+        for count in counts.tolist():
+            end_idx = start_idx + int(count)
+            class_indices.append(flat_indices[start_idx:end_idx].copy())
+            start_idx = end_idx
+        return class_indices
+
     def _load_class_indices_from_cache(self, cache_dir):
         """Load class_indices from cache."""
         try:
             os.makedirs(cache_dir, exist_ok=True)
             cache_file = os.path.join(cache_dir, self._get_cache_key())
-            
-            if os.path.exists(cache_file):
-                with open(cache_file, 'rb') as f:
-                    self.class_indices = pickle.load(f)
-                print(f"✓ Loaded class_indices from cache: {cache_file}")
-                return True
-            else:
+
+            if not os.path.exists(cache_file):
                 return False
+
+            with np.load(cache_file, allow_pickle=False) as cache_data:
+                self.class_indices = self._deserialize_class_indices(
+                    cache_data["counts"],
+                    cache_data["flat_indices"],
+                )
+            print(f"✓ Loaded class_indices from cache: {cache_file}")
+            return True
         except Exception as e:
             print(f"⚠ Failed to load cache: {e}")
             return False
-    
+
     def _save_class_indices_to_cache(self, cache_dir):
         """Save class_indices to cache."""
         try:
             os.makedirs(cache_dir, exist_ok=True)
             cache_file = os.path.join(cache_dir, self._get_cache_key())
-            
-            with open(cache_file, 'wb') as f:
-                pickle.dump(self.class_indices, f)
+            counts, flat_indices = self._serialize_class_indices()
+            temp_file = f"{cache_file}.tmp"
+
+            with open(temp_file, 'wb') as handle:
+                np.savez_compressed(handle, counts=counts, flat_indices=flat_indices)
+            os.replace(temp_file, cache_file)
             print(f"✓ Saved class_indices to cache: {cache_file}")
         except Exception as e:
             print(f"⚠ Failed to save cache: {e}")

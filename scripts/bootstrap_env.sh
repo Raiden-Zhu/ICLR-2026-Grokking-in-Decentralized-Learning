@@ -74,6 +74,35 @@ if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
     exit 1
 fi
 
+assert_safe_venv_dir() {
+    local resolved_venv_dir
+    resolved_venv_dir="$($PYTHON_BIN -c 'import os; print(os.path.realpath(os.path.expanduser(os.environ["BOOTSTRAP_TARGET_DIR"])))')"
+
+    local resolved_root_dir
+    resolved_root_dir="$($PYTHON_BIN -c 'import os; print(os.path.realpath(os.environ["BOOTSTRAP_ROOT_DIR"]))')"
+
+    local resolved_home_dir
+    resolved_home_dir="$($PYTHON_BIN -c 'import os; print(os.path.realpath(os.path.expanduser("~")))')"
+
+    if [[ -z "$resolved_venv_dir" ]]; then
+        echo "Error: VENV_DIR resolved to an empty path"
+        exit 1
+    fi
+
+    case "$resolved_venv_dir" in
+        /|"$resolved_root_dir"|"$resolved_home_dir")
+            echo "Error: Refusing to remove unsafe VENV_DIR path: $resolved_venv_dir"
+            exit 1
+            ;;
+    esac
+}
+
+export BOOTSTRAP_TARGET_DIR="$VENV_DIR"
+export BOOTSTRAP_ROOT_DIR="$ROOT_DIR"
+assert_safe_venv_dir
+unset BOOTSTRAP_TARGET_DIR
+unset BOOTSTRAP_ROOT_DIR
+
 echo "[Bootstrap] Using Python: $(command -v "$PYTHON_BIN")"
 echo "[Bootstrap] Creating virtual environment at: $VENV_DIR"
 if [[ -d "$VENV_DIR" ]]; then

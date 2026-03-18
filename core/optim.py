@@ -25,11 +25,12 @@ def init_optimizer(network, optimizer_name, lr, momentum, weight_decay):
 
 def init_scheduler(optimizer, lr_scheduler_type, max_steps, lr):
     """Create a learning-rate scheduler from config values."""
-    if lr_scheduler_type == "cosine":
+    scheduler_name = lr_scheduler_type.lower()
+    if scheduler_name == "cosine":
         return optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_steps)
-    if lr_scheduler_type == "step":
+    if scheduler_name == "step":
         return optim.lr_scheduler.StepLR(optimizer, max_steps // 2, gamma=0.1)
-    if lr_scheduler_type == "warmup_cosine":
+    if scheduler_name == "warmup_cosine":
         return optim.lr_scheduler.OneCycleLR(
             optimizer,
             max_lr=lr,
@@ -37,12 +38,15 @@ def init_scheduler(optimizer, lr_scheduler_type, max_steps, lr):
             pct_start=0.1,
             anneal_strategy="cos",
         )
-    if lr_scheduler_type == "constant_then_zero":
+    if scheduler_name == "constant_then_zero":
         def lr_lambda(step):
             threshold = int(max_steps * 0.5)
             return 1.0 if step < threshold else 0.0
 
         return LambdaLR(optimizer, lr_lambda)
-    if lr_scheduler_type == "none":
+    if scheduler_name == "none":
         return None
-    return None
+    raise ValueError(
+        "Unsupported lr_scheduler: "
+        f"{lr_scheduler_type}. Supported: cosine, step, warmup_cosine, constant_then_zero, none"
+    )

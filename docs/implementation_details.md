@@ -21,8 +21,9 @@ The repository is built around a simulator-style execution model:
 2. workers publish local node states into shared memory
 3. rank 0 applies the gossip operator centrally over the full logical-node state
 4. updated parameters are broadcast back to workers
+5. evaluation runs only at the explicit scheduled checkpoints after reload
 
-This is why the repository is best understood as a decentralized-learning simulator for optimization behavior rather than as a production distributed runtime for measuring real network costs.
+The current worker loop keeps these publish / aggregate / reload / evaluate stages explicit, with barriers separating them. This is why the repository is best understood as a decentralized-learning simulator for optimization behavior rather than as a production distributed runtime for measuring real network costs.
 
 ## Current Merging Semantics
 
@@ -99,12 +100,14 @@ The current simulator separates model state into two channels:
 - floating model state is packed into shared flat buffers
 - model buffers are copied through separately
 
+The shared-state schema is instantiated from the same model-construction path as the worker models. When a model family uses `pretrained` to choose a structural branch, the schema path follows that same branch while skipping unnecessary pretrained-weight loading in the rank-0 setup process.
+
 The centralized gossip operator is applied to the floating flat-buffer state. In practice, this means learnable floating-point parameters are always communicated, and floating BatchNorm statistics can also move during training-time communication.
 
 - shared state pool creation: [core/shared_state.py](../core/shared_state.py)
 - copying model state into shared buffers: [core/shared_state.py](../core/shared_state.py)
 - flat-buffer gossip update: [core/communication.py](../core/communication.py)
-- centralized round execution: [main_multi_GPU.py](../main_multi_GPU.py)
+- centralized round execution and rank-0 control phase: [main_multi_GPU.py](../main_multi_GPU.py)
 
 At a high level, the current code uses floating state for communication rounds, while reserving stricter semantics for the final merged model.
 
@@ -115,7 +118,7 @@ The repository also reconstructs a global average model directly from the shared
 - average-model reconstruction: [main_multi_GPU.py](../main_multi_GPU.py)
 - mean-state loading helper: [core/shared_state.py](../core/shared_state.py)
 
-After the averaged parameters are loaded, the merged model runs a short BatchNorm re-estimation pass before evaluation. This keeps the merged-model path aligned with the repository's current BatchNorm policy.
+After the averaged parameters are loaded, the merged model runs a short BatchNorm re-estimation pass before evaluation. This keeps the merged-model path aligned with the repository's current BatchNorm policy. The average-model path and final convergence-model export are both reconstructed on the centralized aggregation device, which currently remains equivalent to `cuda:0` by policy.
 
 So the current implementation intentionally distinguishes between:
 
@@ -141,6 +144,16 @@ BatchNorm exposes an important difference between "state that can be numerically
 - `num_batches_tracked` is a counter and should not be merged by naive averaging
 
 This is why a blanket "average every tensor in the state dict" rule is usually too coarse for serious model-merging analysis under non-IID data.
+
+## Compatibility Surface
+
+For older commands and YAMLs, the repository still keeps a narrow compatibility surface at the launcher/config layer:
+
+- `num_gpus` is normalized to the canonical `num_GPU`
+- `non_iid` is normalized to the canonical `nonIID`
+- `load_pickle` is accepted only as a legacy no-op input and does not participate in current training semantics
+
+This compatibility layer exists to keep old configs runnable while making the active implementation boundary clearer.
 
 ## Practical Note on Non-Floating State
 

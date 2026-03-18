@@ -32,13 +32,13 @@ The current implementation follows this sequence:
 
 1. Create all logical nodes and assign subsets of them to GPU workers.
 2. Run local training independently for each node for `k_steps` local updates.
-3. Synchronize node parameters across workers.
-4. Construct the gossip matrix for the current round.
-5. Apply the gossip update over the full logical node set.
-6. Send updated parameters back to the GPU workers.
+3. Publish local states into shared memory.
+4. Let the rank-0 control path construct the gossip matrix and apply the centralized aggregation step.
+5. Reload the updated parameters back onto the GPU workers.
+6. Run evaluation only when the explicit shared evaluation schedule says so; that schedule is anchored to the slowest logical node's completed local step rather than to one fixed worker-local node.
 7. Repeat until the per-node training budget is exhausted.
 
-This means the node-level learning rule is preserved, while the execution is packed onto fewer GPUs.
+This means the node-level learning rule is preserved, while the execution is packed onto fewer GPUs. The publish / aggregate / reload / evaluate boundaries are kept explicit in the implementation so that refactors do not silently change the synchronization protocol.
 
 ## What "Simulation" Means Here
 
@@ -66,7 +66,10 @@ The total number of logical decentralized-learning nodes.
 
 ### `num_GPU`
 
-The number of GPU worker processes. When `num_nodes` is larger than `num_GPU`, each GPU hosts multiple logical nodes.
+The canonical training key for the number of GPU worker processes. When `num_nodes` is larger than `num_GPU`, each GPU hosts multiple logical nodes.
+
+Compatibility note:
+- `num_gpus` is still accepted by the config launcher and validation layer as an alias, but the internal canonical name is `num_GPU`.
 
 ### `k_steps`
 
@@ -92,6 +95,10 @@ These control how many extra neighbors are used and how connectivity changes ove
 
 ### `nonIID`, `alpha`, `node_datasize`, `data_sampling_mode`
 
+Compatibility note:
+- `nonIID` is the canonical training key.
+- `non_iid` is still accepted as a compatibility alias by the launcher and validation layer.
+
 These control the local data regime. Smaller `alpha` means stronger heterogeneity under a Dirichlet split.
 
 `data_sampling_mode` answers a different question from `alpha`.
@@ -105,6 +112,15 @@ The two modes are:
 - `resample`: keep the node's class distribution fixed, but redraw concrete sample indices as the dataloader iterator is recreated. This is the paper-facing mode used for reproducing the original workflow.
 
 So `fixed` means fixed class distribution plus fixed sample identities, while `resample` means fixed class distribution plus changing sample identities.
+
+### `strict_loading`, `max_failure_ratio`
+
+These control the hardened TinyImageNet loading path.
+
+- `strict_loading=true` fails fast when corrupted samples are encountered.
+- `max_failure_ratio` allows bounded tolerance before the loader raises.
+
+They are mainly relevant when reproducing TinyImageNet experiments or validating local dataset integrity.
 
 ### `post_merge_rounds`
 
@@ -129,6 +145,14 @@ A stronger systems claim would require a different implementation and a differen
 Suppose you have 4 GPUs but want to study 32 decentralized nodes.
 
 The repository can assign 8 logical nodes to each GPU worker, run local updates for those nodes, synchronize their states, apply gossip over all 32 logical nodes, and then continue training. This lets you study decentralized-learning dynamics under node counts that exceed your GPU count.
+
+## Compatibility Notes
+
+The current user-facing launcher keeps a small compatibility surface for older configs and commands:
+
+- `num_gpus` and `non_iid` are normalized into the canonical keys `num_GPU` and `nonIID`, and current launcher/validation paths emit a deprecation warning when those aliases are used
+- `load_pickle` is still accepted as a legacy no-op input, but it does not affect current training semantics
+- `scripts/run_with_config.py` is the recommended entrypoint because it applies this normalization before dispatching to the training code
 
 ## Project Positioning
 

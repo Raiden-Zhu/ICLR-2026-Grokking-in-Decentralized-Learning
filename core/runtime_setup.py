@@ -42,6 +42,27 @@ class DatasetBundle:
     valid_dataloaders: Sequence[Any]
 
 
+@dataclass(frozen=True)
+class RuntimeSynchronization:
+    log_queue: Any
+    shared_reference_step: Any
+    shared_node_steps: Any
+    shared_next_eval_step: Any
+    shared_should_eval: Any
+    barrier: Barrier
+
+
+@dataclass(frozen=True)
+class PreparedTrainingRuntime:
+    dataset_bundle: DatasetBundle
+    config: Any
+    shared_state_pool: Any
+    calibration_loader: Any
+    synchronization: RuntimeSynchronization
+    train_dataloaders_split: Sequence[Any]
+    valid_dataloaders_split: Sequence[Any]
+
+
 def set_multiprocessing_spawn() -> None:
     try:
         mp.set_start_method("spawn", force=True)
@@ -257,14 +278,38 @@ def create_runtime_synchronization(
     )
     shared_should_eval = mp.Value("i", 0)
     barrier = Barrier(world_size)
-    return (
-        log_queue,
-        shared_reference_step,
-        shared_node_steps,
-        shared_next_eval_step,
-        shared_should_eval,
-        barrier,
+    return RuntimeSynchronization(
+        log_queue=log_queue,
+        shared_reference_step=shared_reference_step,
+        shared_node_steps=shared_node_steps,
+        shared_next_eval_step=shared_next_eval_step,
+        shared_should_eval=shared_should_eval,
+        barrier=barrier,
     )
+
+
+def split_dataloaders_by_rank(
+    train_dataloaders,
+    valid_dataloaders,
+    world_size: int,
+    networks_per_gpu: int,
+    num_nodes: int,
+    get_local_node_indices: Callable[[int, int, int, int], Tuple[int, int, Iterable[int]]],
+):
+    """Partition logical-node dataloaders according to worker ownership."""
+    train_dataloaders_split = []
+    valid_dataloaders_split = []
+    for rank in range(world_size):
+        start_idx, end_idx, _ = get_local_node_indices(
+            rank, world_size, num_nodes, networks_per_gpu
+        )
+        train_dataloaders_split.append(train_dataloaders[start_idx:end_idx])
+        valid_dataloaders_split.append(valid_dataloaders[start_idx:end_idx])
+    return train_dataloaders_split, valid_dataloaders_split
+
+
+def build_training_config(*, config_cls: Callable[..., Any], **config_kwargs):
+    return config_cls(**config_kwargs)
 
 
 def start_logging_thread(log_queue, total_steps: int, num_nodes: int, logging_process):
@@ -393,6 +438,132 @@ def initialize_shared_training_state(
 
     calibration_loader = create_bn_reestimation_loader(train_subset, batch_size)
     return shared_state_pool, calibration_loader
+
+
+def prepare_training_runtime(
+    *,
+    dataset_path: str,
+    dataset_name: str,
+    image_size: int,
+    batch_size: int,
+    seed: int,
+    strict_loading: bool,
+    max_failure_ratio: float,
+    non_iid: bool,
+    alpha: float,
+    num_nodes: int,
+    node_datasize: int,
+    train_data_ratio: float,
+    data_loading_workers: int,
+    data_sampling_mode: str,
+    world_size: int,
+    networks_per_gpu: int,
+    max_steps: int,
+    k_steps: int,
+    eval_steps: int,
+    model_name: str,
+    pretrained: bool,
+    optimizer_name: str,
+    lr: float,
+    momentum: float,
+    weight_decay: float,
+    lr_scheduler: str,
+    amp_enabled: bool,
+    amp_dtype: str,
+    gossip_topology: Any,
+    r_start: float,
+    r_end: float,
+    r_schedule: str,
+    point1: float,
+    window_size: float,
+    diff_init: bool,
+    end_topology: Optional[str],
+    post_merge_rounds: int,
+    model_kwargs: Dict[str, Any],
+    config_cls: Callable[..., Any],
+    get_local_node_indices: Callable[[int, int, int, int], Tuple[int, int, Iterable[int]]],
+    create_model_from_config: Callable[..., Any],
+    create_shared_state_pool: Callable[[Any, int], Any],
+    create_bn_reestimation_loader: Callable[[Any, int], Any],
+    initialize_next_eval_step: Callable[[int, int], int],
+) -> PreparedTrainingRuntime:
+    dataset_bundle = prepare_dataset_bundle(
+        dataset_path=dataset_path,
+        dataset_name=dataset_name,
+        image_size=image_size,
+        batch_size=batch_size,
+        seed=seed,
+        strict_loading=strict_loading,
+        max_failure_ratio=max_failure_ratio,
+        non_iid=non_iid,
+        alpha=alpha,
+        num_nodes=num_nodes,
+        node_datasize=node_datasize,
+        train_data_ratio=train_data_ratio,
+        data_loading_workers=data_loading_workers,
+        data_sampling_mode=data_sampling_mode,
+        world_size=world_size,
+    )
+    config = build_training_config(
+        config_cls=config_cls,
+        num_nodes=num_nodes,
+        max_steps=max_steps,
+        k_steps=k_steps,
+        eval_steps=eval_steps,
+        model_name=model_name,
+        pretrained=pretrained,
+        optimizer_name=optimizer_name,
+        lr=lr,
+        momentum=momentum,
+        weight_decay=weight_decay,
+        lr_scheduler=lr_scheduler,
+        amp_enabled=amp_enabled,
+        amp_dtype=amp_dtype,
+        gossip_topology=gossip_topology,
+        r_start=r_start,
+        r_end=r_end,
+        r_schedule=r_schedule,
+        point1=point1,
+        window_size=window_size,
+        seed=seed,
+        diff_init=diff_init,
+        end_topology=end_topology,
+        post_merge_rounds=post_merge_rounds,
+        model_kwargs=model_kwargs,
+    )
+    shared_state_pool, calibration_loader = initialize_shared_training_state(
+        config=config,
+        num_nodes=num_nodes,
+        batch_size=batch_size,
+        train_subset=dataset_bundle.train_subset,
+        create_model_from_config=create_model_from_config,
+        create_shared_state_pool=create_shared_state_pool,
+        create_bn_reestimation_loader=create_bn_reestimation_loader,
+    )
+    synchronization = create_runtime_synchronization(
+        world_size=world_size,
+        num_nodes=num_nodes,
+        eval_steps=eval_steps,
+        max_steps=max_steps,
+        initialize_next_eval_step=initialize_next_eval_step,
+    )
+    train_dataloaders_split, valid_dataloaders_split = split_dataloaders_by_rank(
+        dataset_bundle.train_dataloaders,
+        dataset_bundle.valid_dataloaders,
+        world_size,
+        networks_per_gpu,
+        num_nodes,
+        get_local_node_indices,
+    )
+    return PreparedTrainingRuntime(
+        dataset_bundle=dataset_bundle,
+        config=config,
+        shared_state_pool=shared_state_pool,
+        calibration_loader=calibration_loader,
+        synchronization=synchronization,
+        train_dataloaders_split=train_dataloaders_split,
+        valid_dataloaders_split=valid_dataloaders_split,
+    )
 
 
 def finalize_worker_orchestration(

@@ -1,32 +1,49 @@
-from torch.utils.data import Dataset
-from typing import Tuple, Any
+"""Legacy dataset-partition compatibility helpers.
+
+This module is no longer used by the active simulator data path, which now
+relies on DatasetView-based subsets and dirichlet_sampling.py. It is kept only
+as a small compatibility helper for older external scripts.
+"""
+
 import random
+from typing import Any, Optional
+
+from torch.utils.data import Dataset
 
 
 class DistributedDataset(Dataset):
-    def __init__(self, dataset: Dataset, index):
+    def __init__(self, dataset: Dataset, indices):
         super().__init__()
         self.dataset = dataset
-        self.index = index
+        self.indices = list(indices)
 
     def __getitem__(self, item):
-        return self.dataset.__getitem__(self.index[item])
+        return self.dataset[self.indices[item]]
 
     def __len__(self):
-        return len(self.index)
+        return len(self.indices)
 
 
-def distribute_dataset(dataset: Dataset, split: Any, rank: int, size: int = None, seed: int = 777, dirichlet: bool = False):
-    if dirichlet == True:
+def distribute_dataset(
+    dataset: Dataset,
+    split: Any,
+    rank: int,
+    size: Optional[int] = None,
+    seed: int = 777,
+    dirichlet: bool = False,
+):
+    if dirichlet:
         return DistributedDataset(dataset, split[rank])
-    if size is None:
-        size = len(dataset)
-    random.seed(seed)
-    indexes = [x for x in range(size)]
-    random.shuffle(indexes)
-    indexes_list = []
-    # split must contain cumulative cut points.
-    for s in split:
-        indexes_list.append(indexes[:int(s * size)])
-        indexes = indexes[int(s * size):]
-    return DistributedDataset(dataset, indexes_list[rank])
+
+    dataset_size = len(dataset) if size is None else int(size)
+    generator = random.Random(seed)
+    indices = list(range(dataset_size))
+    generator.shuffle(indices)
+
+    index_splits = []
+    for cutoff in split:
+        boundary = int(cutoff * dataset_size)
+        index_splits.append(indices[:boundary])
+        indices = indices[boundary:]
+
+    return DistributedDataset(dataset, index_splits[rank])

@@ -66,9 +66,12 @@ repo_python() {
 load_env_file "$ROOT_DIR/.env"
 load_env_file "$ROOT_DIR/.env.local"
 
-export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 export HF_HOME="${HF_HOME:-$ROOT_DIR/cache/hf_home}"
 export OPENCLIP_CACHE_DIR="${OPENCLIP_CACHE_DIR:-$HF_HOME}"
+
+if [[ -n "${HF_ENDPOINT:-}" ]]; then
+    export HF_ENDPOINT
+fi
 
 if [[ -n "${WANDB_PROJECT:-}" ]]; then
     export WANDB_PROJECT

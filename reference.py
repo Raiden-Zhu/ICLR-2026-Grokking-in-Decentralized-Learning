@@ -1,8 +1,9 @@
-"""
-Multi-GPU Decentralized Training Script for Generic Sharded Data (e.g. FineWeb-Edu).
+"""Legacy generic-sharded decentralized training script.
 
-This script simulates Non-IID training by assigning different data shards (physical files) to different nodes.
-It maintains full compatibility with the original decentralized training logic (Gossip, CDAT, etc.).
+This file is not part of the active simulator workflow documented in the current
+repository. It is kept only as a historical experiment script for setups that
+still provide the external `src/`, `hessian_utils2`, and `data_loader_generic`
+modules that it depends on.
 """
 import os
 import argparse
@@ -13,27 +14,50 @@ import queue
 import glob
 from pathlib import Path
 from copy import deepcopy
-from typing import List, Dict
+from typing import Dict, List
 
-import torch
-import torch.nn as nn
-import torch.multiprocessing as mp
-from torch.multiprocessing import Manager, Barrier
-import torch.distributed as dist
 import numpy as np
-from torch.utils.data import DataLoader, ConcatDataset
+import torch
+import torch.distributed as dist
+import torch.multiprocessing as mp
+import torch.nn as nn
+from torch.multiprocessing import Barrier, Manager
+from torch.utils.data import ConcatDataset, DataLoader
 
-# Import original utilities
-from hessian_utils2 import estimate_precondhessian_lmax_blockdiag
-from src.utils.gossip_matrix_new import create_gossip_matrix, gossip_update, gossip_accumulate
-from src.utils.decentralized_utils import create_consensus_model, compute_consensus_error
-from src.optim.cdat_utils import CDATManager
-from src.utils.asymmetry_utils import convert_to_asymmetric_model
-from src.model import build_model_from_args, get_hessian_blocks, infer_model_family_from_name
-from src.optim import build_optimizers
+LEGACY_REFERENCE_MISSING_DEPENDENCIES = []
 
-# Import new Generic Sharded Loader
-from data_loader_generic import GenericShardedDataset
+try:
+    from hessian_utils2 import estimate_precondhessian_lmax_blockdiag
+except ImportError:
+    estimate_precondhessian_lmax_blockdiag = None
+    LEGACY_REFERENCE_MISSING_DEPENDENCIES.append("hessian_utils2")
+
+try:
+    from src.model import build_model_from_args, get_hessian_blocks, infer_model_family_from_name
+    from src.optim import build_optimizers
+    from src.optim.cdat_utils import CDATManager
+    from src.utils.asymmetry_utils import convert_to_asymmetric_model
+    from src.utils.decentralized_utils import create_consensus_model, compute_consensus_error
+    from src.utils.gossip_matrix_new import create_gossip_matrix, gossip_accumulate, gossip_update
+except ImportError:
+    build_model_from_args = None
+    get_hessian_blocks = None
+    infer_model_family_from_name = None
+    build_optimizers = None
+    CDATManager = None
+    convert_to_asymmetric_model = None
+    create_consensus_model = None
+    compute_consensus_error = None
+    create_gossip_matrix = None
+    gossip_accumulate = None
+    gossip_update = None
+    LEGACY_REFERENCE_MISSING_DEPENDENCIES.append("src")
+
+try:
+    from data_loader_generic import GenericShardedDataset
+except ImportError:
+    GenericShardedDataset = None
+    LEGACY_REFERENCE_MISSING_DEPENDENCIES.append("data_loader_generic")
 
 # WandB support
 try:
@@ -43,6 +67,19 @@ except ImportError:
     WANDB_AVAILABLE = False
 
 import math
+
+
+def ensure_legacy_reference_dependencies_available():
+    if not LEGACY_REFERENCE_MISSING_DEPENDENCIES:
+        return
+
+    missing = ", ".join(sorted(set(LEGACY_REFERENCE_MISSING_DEPENDENCIES)))
+    raise RuntimeError(
+        "reference.py is a legacy script that depends on external modules not shipped "
+        f"with this repository snapshot: {missing}. "
+        "Use main_multi_GPU.py / scripts/run_with_config.py for the active workflow, "
+        "or restore the legacy dependencies before running reference.py."
+    )
 
 def get_scheduled_value(
     step: int, 
@@ -988,6 +1025,10 @@ class PseudoOptimizer:
 
 def main():
     parser = argparse.ArgumentParser(description='Non-IID Decentralized Training (Generic Shards)')
+
+    # Keep --help available, but fail clearly before any legacy runtime starts.
+    if any(flag in os.sys.argv[1:] for flag in ('-h', '--help')):
+        pass
     parser.add_argument('--n_nodes', type=int, default=16, help='Total number of nodes')
     parser.add_argument('--num_gpus', type=int, default=8, help='Number of GPUs available')
     parser.add_argument('--batch_size', type=int, default=16)
@@ -1072,6 +1113,7 @@ def main():
     parser.add_argument('--adam_beta2', type=float, default=0.95)
     parser.add_argument('--weight_decay', type=float, default=0.1)
     args = parser.parse_args()
+    ensure_legacy_reference_dependencies_available()
     
     if args.model_config is not None:
         try:

@@ -115,6 +115,8 @@ cp .env.example .env
 
 The environment helper scripts now expect `.env` and `.env.local` to contain plain `KEY=VALUE` pairs rather than arbitrary shell code.
 
+By default, the repository no longer rewrites `HF_ENDPOINT` to a third-party mirror. If you need a mirror for regional connectivity, set it explicitly in your shell, `.env.local`, or YAML config, for example `HF_ENDPOINT=https://hf-mirror.com`.
+
 Optional credential setup:
 
 ```bash
@@ -209,7 +211,7 @@ For implementation-level interpretation of gossip versus global averaging, see [
 The [scripts](scripts) directory is intentionally small and operational. It is best understood as a thin workflow layer around the main training code rather than as a separate subsystem.
 
 - [scripts/bootstrap_env.sh](scripts/bootstrap_env.sh): bootstrap a local Python environment and install dependencies.
-- [scripts/setup_env.sh](scripts/setup_env.sh): load environment variables from local env files using restricted `KEY=VALUE` parsing.
+- [scripts/setup_env.sh](scripts/setup_env.sh): load environment variables from local env files using restricted `KEY=VALUE` parsing; cache locations get safe defaults, while external endpoints such as `HF_ENDPOINT` must be chosen explicitly.
 - [scripts/preflight.sh](scripts/preflight.sh): basic checks before a long run.
 - [scripts/run_with_config.py](scripts/run_with_config.py): the main config-driven launcher.
 - [scripts/run_main_experiment.sh](scripts/run_main_experiment.sh): thin wrapper around the paper-oriented config.

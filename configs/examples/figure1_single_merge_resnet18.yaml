@@ -3,7 +3,6 @@ run:
   python: python3
 
 env:
-  HF_ENDPOINT: https://hf-mirror.com
   HF_HOME: ./cache/hf_home
   OPENCLIP_CACHE_DIR: ./cache/hf_home
 

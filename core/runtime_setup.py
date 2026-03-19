@@ -20,6 +20,39 @@ from datasets.dirichlet_sampling import (
 )
 
 
+TRAINING_CONFIG_KEYS = (
+    "num_nodes",
+    "max_steps",
+    "k_steps",
+    "eval_steps",
+    "model_name",
+    "pretrained",
+    "optimizer_name",
+    "lr",
+    "momentum",
+    "weight_decay",
+    "lr_scheduler",
+    "amp_enabled",
+    "amp_dtype",
+    "gossip_topology",
+    "r_start",
+    "r_end",
+    "r_schedule",
+    "point1",
+    "window_size",
+    "seed",
+    "diff_init",
+    "end_topology",
+    "post_merge_rounds",
+    "model_kwargs",
+)
+
+
+def _pick_kwargs(source: Dict[str, Any], keys: Sequence[str]) -> Dict[str, Any]:
+    """Select a stable subset of keyword arguments from a source mapping."""
+    return {key: source[key] for key in keys}
+
+
 @dataclass(frozen=True)
 class RuntimeLayout:
     world_size: int
@@ -312,6 +345,11 @@ def build_training_config(*, config_cls: Callable[..., Any], **config_kwargs):
     return config_cls(**config_kwargs)
 
 
+def _build_training_config_kwargs(runtime_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract the normalized runtime fields that belong to TrainingConfig."""
+    return _pick_kwargs(runtime_kwargs, TRAINING_CONFIG_KEYS)
+
+
 def start_logging_thread(log_queue, total_steps: int, num_nodes: int, logging_process):
     log_thread = threading.Thread(
         target=logging_process,
@@ -506,30 +544,7 @@ def prepare_training_runtime(
     )
     config = build_training_config(
         config_cls=config_cls,
-        num_nodes=num_nodes,
-        max_steps=max_steps,
-        k_steps=k_steps,
-        eval_steps=eval_steps,
-        model_name=model_name,
-        pretrained=pretrained,
-        optimizer_name=optimizer_name,
-        lr=lr,
-        momentum=momentum,
-        weight_decay=weight_decay,
-        lr_scheduler=lr_scheduler,
-        amp_enabled=amp_enabled,
-        amp_dtype=amp_dtype,
-        gossip_topology=gossip_topology,
-        r_start=r_start,
-        r_end=r_end,
-        r_schedule=r_schedule,
-        point1=point1,
-        window_size=window_size,
-        seed=seed,
-        diff_init=diff_init,
-        end_topology=end_topology,
-        post_merge_rounds=post_merge_rounds,
-        model_kwargs=model_kwargs,
+        **_build_training_config_kwargs(locals()),
     )
     shared_state_pool, calibration_loader = initialize_shared_training_state(
         config=config,

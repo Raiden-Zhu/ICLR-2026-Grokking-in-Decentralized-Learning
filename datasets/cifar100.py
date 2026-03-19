@@ -1,9 +1,7 @@
 import torchvision.transforms as tfs
-from sklearn.model_selection import StratifiedShuffleSplit
-from torch.utils.data import DataLoader
 from torchvision.datasets import CIFAR100
 
-from .common import DatasetView
+from .common import DatasetView, build_split_dataset_views, finalize_classification_dataset
 
 
 def load_cifar100(
@@ -17,9 +15,6 @@ def load_cifar100(
     seed=42,
     return_dataloader=False,
 ):
-    train_subset = None
-    valid_subset = None
-
     if transforms is None:
         transforms_train = tfs.Compose(
             [
@@ -39,54 +34,26 @@ def load_cifar100(
         split = 0.8
 
     base_train_set = CIFAR100(root, True, transform=None, download=True)
-    train_set = DatasetView(base_train_set, transform=transforms_train)
     test_set = DatasetView(
         CIFAR100(root, False, transform=None, download=True),
         transform=transforms_test,
     )
+    train_subset, valid_subset, calibration_view = build_split_dataset_views(
+        base_train_set,
+        transforms_train,
+        transforms_test,
+        split=split,
+        seed=seed,
+    )
 
-    if split < 1.0:
-        labels = base_train_set.targets
-        splitter = StratifiedShuffleSplit(
-            n_splits=1,
-            test_size=1 - split,
-            random_state=seed,
-        )
-        for train_idx, val_idx in splitter.split(range(len(labels)), labels):
-            train_subset = DatasetView(base_train_set, train_idx, transforms_train)
-            valid_subset = DatasetView(base_train_set, val_idx, transforms_test)
-    else:
-        train_subset = train_set
-
-    test_loader = DataLoader(test_set, batch_size=valid_batch_size, drop_last=False)
-    calibration_view = DatasetView(base_train_set, transform=transforms_test)
-
-    if return_dataloader:
-        train_loader = DataLoader(
-            train_subset,
-            batch_size=train_batch_size,
-            shuffle=True,
-            drop_last=True,
-        )
-        valid_loader = (
-            DataLoader(valid_subset, batch_size=valid_batch_size, drop_last=False)
-            if valid_subset is not None
-            else None
-        )
-        return (
-            train_loader,
-            valid_loader,
-            test_loader,
-            (3, image_size, image_size),
-            100,
-            calibration_view,
-        )
-
-    return (
-        train_subset,
-        valid_subset,
-        test_loader,
-        (3, image_size, image_size),
-        100,
-        calibration_view,
+    return finalize_classification_dataset(
+        train_subset=train_subset,
+        valid_subset=valid_subset,
+        test_set=test_set,
+        calibration_view=calibration_view,
+        image_shape=(3, image_size, image_size),
+        num_classes=100,
+        train_batch_size=train_batch_size,
+        valid_batch_size=valid_batch_size,
+        return_dataloader=return_dataloader,
     )

@@ -30,8 +30,8 @@ def evaluate_model_metrics(network, dataloader, device):
     cumulative_loss = 0.0
     with torch.no_grad():
         for images, labels in dataloader:
-            images = images.to(device)
-            labels = labels.to(device)
+            images = images.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True)
             outputs = network(images)
             loss = F.cross_entropy(outputs, labels)
             cumulative_loss += loss.item()

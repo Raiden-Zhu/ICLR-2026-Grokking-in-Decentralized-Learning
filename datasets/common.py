@@ -1,4 +1,5 @@
-from torch.utils.data import Dataset, Subset
+from sklearn.model_selection import StratifiedShuffleSplit
+from torch.utils.data import DataLoader, Dataset, Subset
 
 
 class DatasetView(Dataset):
@@ -48,3 +49,69 @@ def get_dataset_targets(dataset):
         return dataset.labels
 
     raise ValueError("Dataset must expose targets or labels")
+
+
+def build_split_dataset_views(base_train_set, train_transform, eval_transform, *, split, seed):
+    """Build train/valid/calibration dataset views while preserving current split semantics."""
+    train_set = DatasetView(base_train_set, transform=train_transform)
+    calibration_view = DatasetView(base_train_set, transform=eval_transform)
+
+    if split < 1.0:
+        labels = get_dataset_targets(base_train_set)
+        splitter = StratifiedShuffleSplit(
+            n_splits=1,
+            test_size=1 - split,
+            random_state=seed,
+        )
+        for train_idx, val_idx in splitter.split(range(len(labels)), labels):
+            train_subset = DatasetView(base_train_set, train_idx, train_transform)
+            valid_subset = DatasetView(base_train_set, val_idx, eval_transform)
+            return train_subset, valid_subset, calibration_view
+
+    return train_set, None, calibration_view
+
+
+def finalize_classification_dataset(
+    *,
+    train_subset,
+    valid_subset,
+    test_set,
+    calibration_view,
+    image_shape,
+    num_classes,
+    train_batch_size,
+    valid_batch_size,
+    return_dataloader,
+):
+    """Finalize the common dataset return structure without changing output semantics."""
+    test_loader = DataLoader(test_set, batch_size=valid_batch_size, drop_last=False)
+
+    if return_dataloader:
+        train_loader = DataLoader(
+            train_subset,
+            batch_size=train_batch_size,
+            shuffle=True,
+            drop_last=True,
+        )
+        valid_loader = (
+            DataLoader(valid_subset, batch_size=valid_batch_size, drop_last=False)
+            if valid_subset is not None
+            else None
+        )
+        return (
+            train_loader,
+            valid_loader,
+            test_loader,
+            image_shape,
+            num_classes,
+            calibration_view,
+        )
+
+    return (
+        train_subset,
+        valid_subset,
+        test_loader,
+        image_shape,
+        num_classes,
+        calibration_view,
+    )

@@ -24,6 +24,27 @@ def _try_log_mergeability_gap(step, avg_test_metrics, avg_model_metrics):
     return True
 
 
+def _flush_buffered_metrics(step, metrics_by_network, prefix, *, include_average):
+    """Emit one W&B record for one logical step while keeping metric keys unchanged."""
+    payload = {"step": step}
+    for network_idx, metrics in metrics_by_network.items():
+        payload[f"{prefix}_loss/network_{network_idx}"] = metrics["loss"]
+        payload[f"{prefix}_accuracy/network_{network_idx}"] = metrics["accuracy"]
+
+    average_metrics = None
+    if include_average:
+        avg_loss = sum(m["loss"] for m in metrics_by_network.values()) / len(metrics_by_network)
+        avg_accuracy = sum(m["accuracy"] for m in metrics_by_network.values()) / len(
+            metrics_by_network
+        )
+        payload[f"avg_{prefix}_loss"] = avg_loss
+        payload[f"avg_{prefix}_accuracy"] = avg_accuracy
+        average_metrics = {"loss": avg_loss, "accuracy": avg_accuracy}
+
+    wandb.log(payload)
+    return average_metrics
+
+
 def logging_process(log_queue, total_steps, num_nodes):
     """Handle W&B logging from all worker processes."""
     train_metrics_buffer = {}
@@ -45,14 +66,6 @@ def logging_process(log_queue, total_steps, num_nodes):
             if log_type == "train":
                 network_idx = log_item["network_idx"]
                 step = log_item["step"]
-
-                wandb.log(
-                    {
-                        f"train_loss/network_{network_idx}": log_item["loss"],
-                        f"train_accuracy/network_{network_idx}": log_item["accuracy"],
-                        "step": step,
-                    }
-                )
                 pbar.update(log_item.get("k_steps", 1))
 
                 if step not in train_metrics_buffer:
@@ -63,34 +76,17 @@ def logging_process(log_queue, total_steps, num_nodes):
                 }
 
                 if len(train_metrics_buffer[step]) == num_nodes:
-                    avg_train_loss = (
-                        sum(m["loss"] for m in train_metrics_buffer[step].values())
-                        / num_nodes
-                    )
-                    avg_train_accuracy = (
-                        sum(m["accuracy"] for m in train_metrics_buffer[step].values())
-                        / num_nodes
-                    )
-                    wandb.log(
-                        {
-                            "avg_train_loss": avg_train_loss,
-                            "avg_train_accuracy": avg_train_accuracy,
-                            "step": step,
-                        }
+                    _flush_buffered_metrics(
+                        step,
+                        train_metrics_buffer[step],
+                        "train",
+                        include_average=True,
                     )
                     del train_metrics_buffer[step]
 
             elif log_type == "valid":
                 network_idx = log_item["network_idx"]
                 step = log_item["step"]
-
-                wandb.log(
-                    {
-                        f"valid_accuracy/network_{network_idx}": log_item["accuracy"],
-                        f"valid_loss/network_{network_idx}": log_item["loss"],
-                        "step": step,
-                    }
-                )
 
                 if step not in valid_metrics_buffer:
                     valid_metrics_buffer[step] = {}
@@ -100,34 +96,17 @@ def logging_process(log_queue, total_steps, num_nodes):
                 }
 
                 if len(valid_metrics_buffer[step]) == num_nodes:
-                    avg_valid_loss = (
-                        sum(m["loss"] for m in valid_metrics_buffer[step].values())
-                        / num_nodes
-                    )
-                    avg_valid_accuracy = (
-                        sum(m["accuracy"] for m in valid_metrics_buffer[step].values())
-                        / num_nodes
-                    )
-                    wandb.log(
-                        {
-                            "avg_valid_loss": avg_valid_loss,
-                            "avg_valid_accuracy": avg_valid_accuracy,
-                            "step": step,
-                        }
+                    _flush_buffered_metrics(
+                        step,
+                        valid_metrics_buffer[step],
+                        "valid",
+                        include_average=True,
                     )
                     del valid_metrics_buffer[step]
 
             elif log_type == "test":
                 network_idx = log_item["network_idx"]
                 step = log_item["step"]
-
-                wandb.log(
-                    {
-                        f"test_accuracy/network_{network_idx}": log_item["accuracy"],
-                        f"test_loss/network_{network_idx}": log_item["loss"],
-                        "step": step,
-                    }
-                )
 
                 if step not in test_metrics_buffer:
                     test_metrics_buffer[step] = {}
@@ -137,25 +116,13 @@ def logging_process(log_queue, total_steps, num_nodes):
                 }
 
                 if len(test_metrics_buffer[step]) == num_nodes:
-                    avg_test_loss = (
-                        sum(m["loss"] for m in test_metrics_buffer[step].values())
-                        / num_nodes
+                    average_metrics = _flush_buffered_metrics(
+                        step,
+                        test_metrics_buffer[step],
+                        "test",
+                        include_average=True,
                     )
-                    avg_test_accuracy = (
-                        sum(m["accuracy"] for m in test_metrics_buffer[step].values())
-                        / num_nodes
-                    )
-                    wandb.log(
-                        {
-                            "avg_test_loss": avg_test_loss,
-                            "avg_test_accuracy": avg_test_accuracy,
-                            "step": step,
-                        }
-                    )
-                    avg_test_metrics[step] = {
-                        "loss": avg_test_loss,
-                        "accuracy": avg_test_accuracy,
-                    }
+                    avg_test_metrics[step] = average_metrics
                     _try_log_mergeability_gap(step, avg_test_metrics, avg_model_metrics)
                     del test_metrics_buffer[step]
 

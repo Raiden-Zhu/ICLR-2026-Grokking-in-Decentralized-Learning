@@ -138,6 +138,7 @@ def train_local_models_for_round(
         correct_train = 0
         total_train = 0
         executed_steps = 0
+        optimizer.zero_grad(set_to_none=True)
 
         for _ in range(communication_round_steps):
             if local_steps_completed[local_idx] >= config.max_steps:
@@ -149,9 +150,8 @@ def train_local_models_for_round(
                 data_iter = iter(train_dataloader)
                 inputs, targets = next(data_iter)
 
-            inputs = inputs.to(device)
-            targets = targets.to(device)
-            optimizer.zero_grad()
+            inputs = inputs.to(device, non_blocking=True)
+            targets = targets.to(device, non_blocking=True)
 
             with torch.amp.autocast(
                 device_type="cuda",
@@ -181,12 +181,11 @@ def train_local_models_for_round(
 
             executed_steps += 1
 
-            optimizer.zero_grad()
-
             _, predicted = torch.max(outputs.data, 1)
             correct_train += (predicted == targets).sum().item()
             total_train += targets.size(0)
             local_steps_completed[local_idx] += 1
+            optimizer.zero_grad(set_to_none=True)
 
             if local_steps_completed[local_idx] >= config.max_steps:
                 break
@@ -207,8 +206,6 @@ def train_local_models_for_round(
                 "k_steps": executed_steps,
             }
         )
-
-        network.zero_grad()
 
 
 def publish_local_state(local_node_indices, local_networks, shared_state_pool):

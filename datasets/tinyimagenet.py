@@ -8,11 +8,10 @@ from typing import Tuple
 import numpy as np
 import torchvision.transforms as tfs
 from PIL import Image
-from sklearn.model_selection import StratifiedShuffleSplit
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from .common import DatasetView
+from .common import DatasetView, build_split_dataset_views, finalize_classification_dataset
 
 
 class DownloadProgressBar(tqdm):
@@ -322,7 +321,6 @@ def load_tinyimagenet(
         strict_loading=strict_loading,
         max_failure_ratio=max_failure_ratio,
     )
-    train_set = DatasetView(base_train_set, transform=train_transforms)
     test_set = DatasetView(
         TinyImageNet(
             root,
@@ -335,36 +333,21 @@ def load_tinyimagenet(
         transform=valid_transforms,
     )
 
-    valid_subset = None
-    if split < 1.0:
-        labels = base_train_set.targets
-        splitter = StratifiedShuffleSplit(
-            n_splits=1, test_size=1 - split, random_state=seed
-        )
-        for train_idx, val_idx in splitter.split(range(len(labels)), labels):
-            train_subset = DatasetView(base_train_set, train_idx, train_transforms)
-            valid_subset = DatasetView(base_train_set, val_idx, valid_transforms)
-    else:
-        train_subset = train_set
-
-    test_loader = DataLoader(test_set, batch_size=valid_batch_size, drop_last=False)
-    calibration_view = DatasetView(base_train_set, transform=valid_transforms)
-    if return_dataloader:
-        train_loader = DataLoader(
-            train_subset, batch_size=train_batch_size, shuffle=True, drop_last=True
-        )
-        valid_loader = (
-            DataLoader(valid_subset, batch_size=valid_batch_size, drop_last=False)
-            if valid_subset is not None
-            else None
-        )
-
-        return (
-            train_loader,
-            valid_loader,
-            test_loader,
-            (3, image_size, image_size),
-            200,
-            calibration_view,
-        )
-    return train_subset, valid_subset, test_loader, (3, image_size, image_size), 200, calibration_view
+    train_subset, valid_subset, calibration_view = build_split_dataset_views(
+        base_train_set,
+        train_transforms,
+        valid_transforms,
+        split=split,
+        seed=seed,
+    )
+    return finalize_classification_dataset(
+        train_subset=train_subset,
+        valid_subset=valid_subset,
+        test_set=test_set,
+        calibration_view=calibration_view,
+        image_shape=(3, image_size, image_size),
+        num_classes=200,
+        train_batch_size=train_batch_size,
+        valid_batch_size=valid_batch_size,
+        return_dataloader=return_dataloader,
+    )

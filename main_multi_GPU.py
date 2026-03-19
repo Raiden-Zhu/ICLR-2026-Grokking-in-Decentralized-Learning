@@ -53,6 +53,112 @@ import wandb
 # Note: wandb.login() will be called in main() only on rank 0
 
 
+WANDB_INIT_KEYS = (
+    "project_name",
+    "dataset_name",
+    "model_name",
+    "num_nodes",
+    "k_steps",
+    "eval_steps",
+    "max_steps",
+    "optimizer_name",
+    "lr",
+    "momentum",
+    "weight_decay",
+    "lr_scheduler",
+    "amp_enabled",
+    "amp_dtype",
+    "batch_size",
+    "gossip_topology",
+    "node_datasize",
+    "alpha",
+    "data_sampling_mode",
+    "image_size",
+    "r_schedule",
+    "pretrained",
+    "point1",
+    "window_size",
+    "seed",
+    "diff_init",
+    "end_topology",
+    "post_merge_rounds",
+    "num_GPU",
+    "nonIID",
+)
+
+RUNTIME_PREPARE_KEYS = (
+    "dataset_path",
+    "dataset_name",
+    "image_size",
+    "batch_size",
+    "seed",
+    "strict_loading",
+    "max_failure_ratio",
+    "alpha",
+    "num_nodes",
+    "node_datasize",
+    "train_data_ratio",
+    "data_loading_workers",
+    "data_sampling_mode",
+    "max_steps",
+    "k_steps",
+    "eval_steps",
+    "model_name",
+    "pretrained",
+    "optimizer_name",
+    "lr",
+    "momentum",
+    "weight_decay",
+    "lr_scheduler",
+    "amp_enabled",
+    "amp_dtype",
+    "gossip_topology",
+    "r_start",
+    "r_end",
+    "r_schedule",
+    "point1",
+    "window_size",
+    "diff_init",
+    "end_topology",
+    "post_merge_rounds",
+    "model_kwargs",
+    "nonIID",
+)
+
+
+def _pick_kwargs(source, keys, *, rename=None):
+    """Select a stable subset of keyword arguments with optional key renaming."""
+    rename = {} if rename is None else dict(rename)
+    return {rename.get(key, key): source[key] for key in keys}
+
+
+def _normalize_main_runtime_args(raw_args):
+    """Normalize main() inputs once and prepare runtime-safe mutable copies."""
+    normalized_args = normalize_main_kwargs(raw_args)
+    normalized_args["model_kwargs"] = (
+        {} if normalized_args["model_kwargs"] is None else dict(normalized_args["model_kwargs"])
+    )
+    return normalized_args
+
+
+def _build_wandb_init_kwargs(normalized_args):
+    """Build the explicit W&B config payload without leaking alias names downstream."""
+    return _pick_kwargs(
+        normalized_args,
+        WANDB_INIT_KEYS,
+        rename={"num_GPU": "num_gpus", "nonIID": "non_iid"},
+    )
+
+
+def _build_prepare_runtime_kwargs(normalized_args):
+    """Build the runtime-setup kwargs from normalized entrypoint arguments."""
+    return _pick_kwargs(
+        normalized_args,
+        RUNTIME_PREPARE_KEYS,
+        rename={"nonIID": "non_iid"},
+    )
+
+
 @dataclass(frozen=True)
 class TrainingConfig:
     """Serializable training configuration shared with worker processes."""
@@ -275,175 +381,26 @@ def main(
     Compatibility note:
     - load_pickle is accepted only for backward compatibility and does not affect training behavior.
     """
-    raw_args = {
-        "dataset_path": dataset_path,
-        "dataset_name": dataset_name,
-        "num_nodes": num_nodes,
-        "num_GPU": num_GPU,
-        "k_steps": k_steps,
-        "eval_steps": eval_steps,
-        "gossip_topology": gossip_topology,
-        "max_steps": max_steps,
-        "pretrained": pretrained,
-        "model_name": model_name,
-        "optimizer_name": optimizer_name,
-        "lr": lr,
-        "batch_size": batch_size,
-        "momentum": momentum,
-        "weight_decay": weight_decay,
-        "lr_scheduler": lr_scheduler,
-        "amp_enabled": amp_enabled,
-        "amp_dtype": amp_dtype,
-        "node_datasize": node_datasize,
-        "nonIID": nonIID,
-        "alpha": alpha,
-        "image_size": image_size,
-        "data_loading_workers": data_loading_workers,
-        "train_data_ratio": train_data_ratio,
-        "project_name": project_name,
-        "r_start": r_start,
-        "r_end": r_end,
-        "r_schedule": r_schedule,
-        "point1": point1,
-        "window_size": window_size,
-        # Legacy compatibility only; kept so older CLI/YAML inputs still parse.
-        "load_pickle": load_pickle,
-        "seed": seed,
-        "diff_init": diff_init,
-        "end_topology": end_topology,
-        "post_merge_rounds": post_merge_rounds,
-        "data_sampling_mode": data_sampling_mode,
-        "strict_loading": strict_loading,
-        "max_failure_ratio": max_failure_ratio,
-        "num_gpus": num_gpus,
-        "non_iid": non_iid,
-        "model_kwargs": model_kwargs,
-    }
-    normalized_args = normalize_main_kwargs(raw_args)
-
-    dataset_path = normalized_args["dataset_path"]
-    dataset_name = normalized_args["dataset_name"]
-    num_nodes = normalized_args["num_nodes"]
-    num_gpus = normalized_args["num_GPU"]
-    k_steps = normalized_args["k_steps"]
-    eval_steps = normalized_args["eval_steps"]
-    gossip_topology = normalized_args["gossip_topology"]
-    max_steps = normalized_args["max_steps"]
-    pretrained = normalized_args["pretrained"]
-    model_name = normalized_args["model_name"]
-    optimizer_name = normalized_args["optimizer_name"]
-    lr = normalized_args["lr"]
-    batch_size = normalized_args["batch_size"]
-    momentum = normalized_args["momentum"]
-    weight_decay = normalized_args["weight_decay"]
-    lr_scheduler = normalized_args["lr_scheduler"]
-    amp_enabled = normalized_args["amp_enabled"]
-    amp_dtype = normalized_args["amp_dtype"]
-    node_datasize = normalized_args["node_datasize"]
-    non_iid = normalized_args["nonIID"]
-    alpha = normalized_args["alpha"]
-    image_size = normalized_args["image_size"]
-    data_loading_workers = normalized_args["data_loading_workers"]
-    train_data_ratio = normalized_args["train_data_ratio"]
-    project_name = normalized_args["project_name"]
-    r_start = normalized_args["r_start"]
-    r_end = normalized_args["r_end"]
-    r_schedule = normalized_args["r_schedule"]
-    point1 = normalized_args["point1"]
-    window_size = normalized_args["window_size"]
-    seed = normalized_args["seed"]
-    diff_init = normalized_args["diff_init"]
-    end_topology = normalized_args["end_topology"]
-    post_merge_rounds = normalized_args["post_merge_rounds"]
-    data_sampling_mode = normalized_args["data_sampling_mode"]
-    strict_loading = normalized_args["strict_loading"]
-    max_failure_ratio = normalized_args["max_failure_ratio"]
-    model_kwargs = {} if normalized_args["model_kwargs"] is None else dict(normalized_args["model_kwargs"])
+    normalized_args = _normalize_main_runtime_args(dict(locals()))
 
     set_multiprocessing_spawn()
-    set_seed(seed)
+    set_seed(normalized_args["seed"])
 
-    layout = resolve_runtime_layout(num_nodes, num_gpus)
+    layout = resolve_runtime_layout(normalized_args["num_nodes"], normalized_args["num_GPU"])
     device_policy = resolve_runtime_devices()
     world_size = layout.world_size
     networks_per_gpu = layout.networks_per_gpu
-    print_runtime_layout(num_nodes, layout)
+    print_runtime_layout(normalized_args["num_nodes"], layout)
 
-    if r_start is None:
-        r_start = max(num_nodes - 1, 0)
-    
-    run = initialize_wandb_run(
-        project_name=project_name,
-        dataset_name=dataset_name,
-        model_name=model_name,
-        num_nodes=num_nodes,
-        num_gpus=num_gpus,
-        k_steps=k_steps,
-        eval_steps=eval_steps,
-        max_steps=max_steps,
-        optimizer_name=optimizer_name,
-        lr=lr,
-        momentum=momentum,
-        weight_decay=weight_decay,
-        lr_scheduler=lr_scheduler,
-        amp_enabled=amp_enabled,
-        amp_dtype=amp_dtype,
-        batch_size=batch_size,
-        gossip_topology=gossip_topology,
-        node_datasize=node_datasize,
-        non_iid=non_iid,
-        alpha=alpha,
-        data_sampling_mode=data_sampling_mode,
-        image_size=image_size,
-        r_schedule=r_schedule,
-        pretrained=pretrained,
-        point1=point1,
-        window_size=window_size,
-        seed=seed,
-        diff_init=diff_init,
-        end_topology=end_topology,
-        post_merge_rounds=post_merge_rounds,
-    )
-    
+    if normalized_args["r_start"] is None:
+        normalized_args["r_start"] = max(normalized_args["num_nodes"] - 1, 0)
+
+    initialize_wandb_run(**_build_wandb_init_kwargs(normalized_args))
+
     runtime = prepare_training_runtime(
-        dataset_path=dataset_path,
-        dataset_name=dataset_name,
-        image_size=image_size,
-        batch_size=batch_size,
-        seed=seed,
-        strict_loading=strict_loading,
-        max_failure_ratio=max_failure_ratio,
-        non_iid=non_iid,
-        alpha=alpha,
-        num_nodes=num_nodes,
-        node_datasize=node_datasize,
-        train_data_ratio=train_data_ratio,
-        data_loading_workers=data_loading_workers,
-        data_sampling_mode=data_sampling_mode,
+        **_build_prepare_runtime_kwargs(normalized_args),
         world_size=world_size,
         networks_per_gpu=networks_per_gpu,
-        max_steps=max_steps,
-        k_steps=k_steps,
-        eval_steps=eval_steps,
-        model_name=model_name,
-        pretrained=pretrained,
-        optimizer_name=optimizer_name,
-        lr=lr,
-        momentum=momentum,
-        weight_decay=weight_decay,
-        lr_scheduler=lr_scheduler,
-        amp_enabled=amp_enabled,
-        amp_dtype=amp_dtype,
-        gossip_topology=gossip_topology,
-        r_start=r_start,
-        r_end=r_end,
-        r_schedule=r_schedule,
-        point1=point1,
-        window_size=window_size,
-        diff_init=diff_init,
-        end_topology=end_topology,
-        post_merge_rounds=post_merge_rounds,
-        model_kwargs=model_kwargs,
         config_cls=TrainingConfig,
         get_local_node_indices=get_local_node_indices,
         create_model_from_config=create_model_from_config,
@@ -458,8 +415,8 @@ def main(
     synchronization = runtime.synchronization
     log_thread = start_logging_thread(
         synchronization.log_queue,
-        max_steps * num_nodes,
-        num_nodes,
+        normalized_args["max_steps"] * normalized_args["num_nodes"],
+        normalized_args["num_nodes"],
         logging_process,
     )
 
@@ -494,7 +451,7 @@ def main(
 
     final_networks = reconstruct_final_networks_from_shared_state(
         config=config,
-        num_nodes=num_nodes,
+        num_nodes=normalized_args["num_nodes"],
         shared_state_pool=shared_state_pool,
         create_model_from_config=create_model_from_config,
         copy_shared_buffer_to_model=copy_shared_buffer_to_model,
@@ -530,5 +487,4 @@ def main(
 if __name__ == "__main__":
     parser = build_main_argument_parser()
     args = parser.parse_args()
-    normalized_args = normalize_main_kwargs(vars(args))
-    main(**normalized_args)
+    main(**vars(args))

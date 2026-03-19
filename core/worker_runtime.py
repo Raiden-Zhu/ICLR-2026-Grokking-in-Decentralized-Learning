@@ -287,7 +287,7 @@ def build_gossip_matrix_for_round(config, current_step, log_queue, is_disabled_t
         window_size=config.window_size,
         schedule=config.r_schedule,
     )
-    log_queue.put({"type": "gossip_params", "r": r, "step": current_step})
+    log_queue.put({"type": "gossip_params", "r": r, "step": current_step, "k_steps": config.k_steps})
 
     gossip_matrix, _ = get_sparse_gossip_matrix(
         config.num_nodes,
@@ -325,7 +325,7 @@ def run_rank_zero_gossip_round(
             compute_device=aggregation_device,
         )
         consensus_error = compute_consensus_error_from_buffer(shared_state_pool, buffer_name="target")
-        log_queue.put({"type": "consensus_error", "error": consensus_error, "step": current_step})
+        log_queue.put({"type": "consensus_error", "error": consensus_error, "step": current_step, "k_steps": config.k_steps})
     else:
         copy_source_state_to_target(shared_state_pool)
 
@@ -413,6 +413,7 @@ def run_optional_evaluation_phase(
         test_dataloader,
         evaluation_step,
         log_queue,
+        k_steps=config.k_steps,
     )
     if rank == 0:
         evaluate_average_model_from_shared_state(

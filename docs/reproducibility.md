@@ -9,6 +9,8 @@ The repository currently supports:
 - paper-oriented multi-GPU runs through config-driven launchers
 - smaller smoke tests for environment validation
 - offline or disabled W&B logging when public-cloud logging is not desired
+- image-classification experiments on `CIFAR-10`, `CIFAR-100`, and `TinyImageNet`
+- model families including `ResNet`, `ViT`, `CLIP ViT` classification variants, and `MLP` baselines
 
 The repository does not currently aim to benchmark real network communication overhead across physically separate machines. Its strongest use case is reproducing optimization behavior and topology effects in a controlled simulator.
 
@@ -86,7 +88,8 @@ Practical note:
 - configs/paper/run_main_experiment.yaml: thin wrapper target for the main experiment launcher
 - configs/paper/default_multi_gpu.yaml: baseline multi-GPU preset with larger node count and post-merge rounds
 - both paper presets use `data_sampling_mode=resample`
-- both paper presets set `args.data_loading_workers=0` by default so large runs start more predictably across environments; changing it later is a runtime tuning choice rather than a change to the data or training objective
+- both paper presets follow the repo-wide `data_loading_workers` default unless you override it at launch time
+- in the current runtime, this worker budget is divided across GPU worker processes, so effective per-process loader concurrency depends on both `data_loading_workers` and `num_GPU`
 
 ### Example presets
 
@@ -98,7 +101,7 @@ Practical note:
 - configs/examples/figure1_single_merge_resnet18.yaml: figure-oriented paper preset for the single final merge phenomenon, uses `data_sampling_mode=resample`
 - configs/examples/figure2_dense_window_resnet18.yaml: figure-oriented paper preset for a temporary dense communication window, uses `data_sampling_mode=resample`
 - configs/examples/topology_exponential_random.yaml: isolates the behavior of structured random communication
-- all heavier example presets except the smoke test and the 1-GPU/8-node demo now set `args.data_loading_workers=0` by default, prioritizing stable startup behavior over loader parallelism
+- for heavier example presets, keep `data_loading_workers` as a runtime tuning knob: use the default setting first, and fall back to `--set args.data_loading_workers=0` only if your environment shows unstable startup behavior
 
 ## Key Logged Metrics
 
@@ -122,6 +125,15 @@ W&B axis note:
 - The repository logs an explicit `step` field for train, valid, test, mergeability, topology, and consensus metrics. This is the simulator's shared reference step and is the reader-facing x-axis.
 - W&B also maintains its own internal `_step`, but `_step` only counts logging events. It is not the training step definition used by this repository.
 - When reading curves in W&B, use the logged `step` field as the x-axis rather than `_step`.
+- The repository also logs `round = step // k_steps` as a derived communication-round view. Use it when you want to interpret gossip cadence or compare curves at the level of communication rounds rather than local steps.
+- Concretely, `step` is a per-node local-step notion rather than an all-workers-aggregated work counter. In the current simulator, the shared step used for logging and evaluation is synchronized from logical-node progress and follows the slowest node's completed local step.
+
+## Implementation Notes That Affect Reproduction
+
+- The current repository includes implementation improvements beyond the earliest paper code snapshots, including the AMP path with default `bf16` execution when enabled.
+- Because of these engineering updates, exact numeric results can differ slightly from older runs or earlier internal code versions.
+- The main scientific picture is unchanged: the late-communication / single-global-merge phenomena, mergeability trends, and paper conclusions are preserved.
+- When comparing runs, prioritize trend consistency and relative comparisons rather than expecting bitwise identity with older code paths.
 
 ## Reproducing Paper-Style Phenomena
 
@@ -133,8 +145,8 @@ Recommended preset:
 
 Loader note:
 
-- This preset sets `args.data_loading_workers=0` by default to keep startup behavior predictable across environments. If you increase it later, treat that as a runtime tuning change rather than a paper-facing semantic change.
-- The same default now applies to the other heavier reader-facing presets for the same reason.
+- This preset follows the repo-wide `data_loading_workers` default. If your machine shows a long startup stall during dataloader initialization, try `--set args.data_loading_workers=0` as a compatibility fallback.
+- More generally, tune `data_loading_workers` to match your available CPU cores and memory bandwidth rather than treating one fixed value as universally best.
 
 Sampling note:
 

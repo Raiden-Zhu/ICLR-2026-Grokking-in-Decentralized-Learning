@@ -170,11 +170,11 @@ def check_logging_step_alignment():
         items = [
             {"type": "train", "network_idx": 0, "loss": 1.0, "accuracy": 10.0, "step": 100, "k_steps": 50},
             {"type": "train", "network_idx": 1, "loss": 3.0, "accuracy": 30.0, "step": 100, "k_steps": 50},
-            {"type": "valid", "network_idx": 0, "loss": 1.5, "accuracy": 15.0, "step": 100},
-            {"type": "valid", "network_idx": 1, "loss": 2.5, "accuracy": 25.0, "step": 100},
-            {"type": "test", "network_idx": 0, "loss": 4.0, "accuracy": 40.0, "step": 100},
-            {"type": "avg_model", "test_accuracy": 65.0, "test_loss": 1.2, "step": 100},
-            {"type": "test", "network_idx": 1, "loss": 2.0, "accuracy": 60.0, "step": 100},
+            {"type": "valid", "network_idx": 0, "loss": 1.5, "accuracy": 15.0, "step": 100, "k_steps": 50},
+            {"type": "valid", "network_idx": 1, "loss": 2.5, "accuracy": 25.0, "step": 100, "k_steps": 50},
+            {"type": "test", "network_idx": 0, "loss": 4.0, "accuracy": 40.0, "step": 100, "k_steps": 50},
+            {"type": "avg_model", "test_accuracy": 65.0, "test_loss": 1.2, "step": 100, "k_steps": 50},
+            {"type": "test", "network_idx": 1, "loss": 2.0, "accuracy": 60.0, "step": 100, "k_steps": 50},
         ]
         for item in items:
             log_queue.put(item)
@@ -212,6 +212,10 @@ def check_logging_step_alignment():
     assert_true(valid_payload["step"] == 100, f"Valid step drifted: {valid_payload!r}")
     assert_true(test_payload["step"] == 100, f"Test step drifted: {test_payload!r}")
     assert_true(merged_payload["step"] == 100, f"Merged payload step drifted: {merged_payload!r}")
+    assert_true(train_payload["round"] == 2, f"Train round drifted: {train_payload!r}")
+    assert_true(valid_payload["round"] == 2, f"Valid round drifted: {valid_payload!r}")
+    assert_true(test_payload["round"] == 2, f"Test round drifted: {test_payload!r}")
+    assert_true(merged_payload["round"] == 2, f"Merged payload round drifted: {merged_payload!r}")
     assert_true(
         "avg_test_accuracy" not in test_payload,
         f"Per-node test payload should not duplicate avg test metrics: {test_payload!r}",

@@ -25,6 +25,8 @@ The repository is built around a simulator-style execution model:
 
 The current worker loop keeps these publish / aggregate / reload / evaluate stages explicit, with barriers separating them. This is why the repository is best understood as a decentralized-learning simulator for optimization behavior rather than as a production distributed runtime for measuring real network costs.
 
+The same implementation base currently supports image-classification studies on `CIFAR-10`, `CIFAR-100`, and `TinyImageNet`, with model families including `ResNet`, `ViT`, `CLIP ViT` classification variants, and `MLP` baselines.
+
 ## Current Merging Semantics
 
 There are two closely related merge operators in the repository:
@@ -111,6 +113,11 @@ The centralized gossip operator is applied to the floating flat-buffer state. In
 
 At a high level, the current code uses floating state for communication rounds, while reserving stricter semantics for the final merged model.
 
+Two practical strengths of this path are worth calling out explicitly:
+
+- row-wise sparse gossip operators avoid paying dense-matrix costs for sparse communication patterns
+- shared-memory flat buffers keep inter-process state exchange compact and make centralized gossip updates more efficient for many-node simulation
+
 ### Average-Model Evaluation Path
 
 The repository also reconstructs a global average model directly from the shared target buffer for mergeability analysis.
@@ -164,12 +171,16 @@ A few practical details are useful when reading results from the current codebas
 - launcher aliases such as `num_gpus`/`num_GPU` and `non_iid`/`nonIID` are normalized into one canonical runtime view before training starts
 - CIFAR-10, CIFAR-100, and TinyImageNet share the same dataset-finalization structure, while preserving split policy, transforms, calibration-view semantics, and the existing 6-tuple return contract
 - same-step W&B logging is batched before upload, while preserving metric keys, aggregation rules, and step alignment
+- AMP support includes the current default `bf16` path; this is one source of small numeric differences relative to older code snapshots, even though the main qualitative findings remain unchanged
+- `data_loading_workers` is a runtime tuning knob rather than a fixed scientific parameter; the current setup divides this worker budget across GPU worker processes, so the right value depends on available CPU resources and startup stability
 
 For interpretation purposes, the intended invariants are:
 
 - the training mathematical formulation remains unchanged
 - node-data semantics remain unchanged, including the `data_sampling_mode=resample` stream behavior used by paper-facing runs
 - metric meaning, key names, and step semantics remain unchanged
+
+In particular, the logged `step` is not a global sum over all workers. It represents synchronized per-node local progress, and the current shared reference step is taken from the slowest logical node so evaluation and logging stay aligned across the simulated decentralized system.
 
 The lightweight check `scripts/run_targeted_regression_checks.sh` is available if you want to verify launcher and dataset-path consistency in a local environment.
 

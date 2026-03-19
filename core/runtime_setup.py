@@ -53,6 +53,24 @@ def _pick_kwargs(source: Dict[str, Any], keys: Sequence[str]) -> Dict[str, Any]:
     return {key: source[key] for key in keys}
 
 
+def _format_wandb_run_name(*, dataset_name: str, model_name: str, num_nodes: int, num_gpus: int, max_steps: int, lr_scheduler: str, lr: float, batch_size: int, non_iid: bool, data_sampling_mode: str, gossip_topology: Any) -> str:
+    """Build a concise, stable W&B run name from the most informative knobs."""
+    parts = [
+        str(dataset_name),
+        str(model_name),
+        f"topo={gossip_topology}",
+        f"nodes={num_nodes}",
+        f"gpus={num_gpus}",
+        f"steps={max_steps}",
+        f"sched={lr_scheduler}",
+        f"lr={lr:g}",
+        f"bs={batch_size}",
+        f"noniid={str(bool(non_iid)).lower()}",
+        f"sampling={data_sampling_mode}",
+    ]
+    return "_".join(parts)
+
+
 @dataclass(frozen=True)
 class RuntimeLayout:
     world_size: int
@@ -230,8 +248,18 @@ def initialize_wandb_run(
         },
     )
     _configure_wandb_step_metric(run)
-    run.name = "_".join(
-        [f"{key}={val}" for key, val in run.config.items() if key != "dataset_name"]
+    run.name = _format_wandb_run_name(
+        dataset_name=dataset_name,
+        model_name=model_name,
+        num_nodes=num_nodes,
+        num_gpus=num_gpus,
+        max_steps=max_steps,
+        lr_scheduler=lr_scheduler,
+        lr=lr,
+        batch_size=batch_size,
+        non_iid=non_iid,
+        data_sampling_mode=data_sampling_mode,
+        gossip_topology=gossip_topology,
     )
     return run
 

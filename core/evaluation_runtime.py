@@ -61,7 +61,7 @@ def evaluate_network(network, dataloader, step, node_index, split_name):
     )
 
 
-def log_evaluation_result(log_queue, result):
+def log_evaluation_result(log_queue, result, *, k_steps):
     """Forward evaluation metrics to the central logging thread."""
     if result is None:
         return
@@ -72,6 +72,7 @@ def log_evaluation_result(log_queue, result):
             "accuracy": result.accuracy,
             "loss": result.loss,
             "step": result.step,
+            "k_steps": k_steps,
         }
     )
 
@@ -83,6 +84,8 @@ def evaluate_local_models(
     test_dataloader,
     evaluation_step,
     log_queue,
+    *,
+    k_steps,
 ):
     """Evaluate local models after one centralized gossip/broadcast round."""
     for local_idx, global_idx in enumerate(local_node_indices):
@@ -93,7 +96,7 @@ def evaluate_local_models(
             global_idx,
             "valid",
         )
-        log_evaluation_result(log_queue, valid_result)
+        log_evaluation_result(log_queue, valid_result, k_steps=k_steps)
 
         test_result = evaluate_network(
             local_networks[local_idx],
@@ -102,7 +105,7 @@ def evaluate_local_models(
             global_idx,
             "test",
         )
-        log_evaluation_result(log_queue, test_result)
+        log_evaluation_result(log_queue, test_result, k_steps=k_steps)
 
 
 def get_avg_model(networks, calibration_loader=None, reestimate_batch_norm_stats=None):
@@ -163,6 +166,7 @@ def evaluate_average_model_from_shared_state(
                 "test_accuracy": accuracy,
                 "test_loss": loss,
                 "step": step,
+                "k_steps": config.k_steps,
             }
         )
     del avg_model

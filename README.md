@@ -61,6 +61,25 @@ The same codebase also serves as <mark>*a lightweight simulator for gossip-based
 - Config-driven experimentation over topology, non-IID data, local training frequency, and post-merge rounds.
 - A shared training backbone that serves both paper reproduction and simulator-style experimentation.
 
+## Supported Architectures and Datasets
+
+The current repository is centered on image-classification experiments under decentralized training and mergeability analysis.
+
+- Supported datasets include `CIFAR-10`, `CIFAR-100`, and `TinyImageNet`.
+- Supported model families mainly include `ResNet`, `ViT`, `CLIP ViT` classification variants, and an `MLP` baseline.
+- In practice, the paper-facing presets mostly use ResNet-style backbones, while the shared simulator and model factory also support architecture-level comparisons on the other registered families.
+- For TinyImageNet with small-image settings such as `image_size=64`, the paper-facing default is `model_name=resnet18_cifar_stem`.
+- If you want a ResNet-18 variant closer to torchvision/ImageNet stem semantics, use `model_name=resnet18_imagenet_stem`.
+
+## Implementation Strengths
+
+Several implementation choices make the simulator practical for larger many-node studies on limited hardware:
+
+- The communication path supports row-wise sparse gossip operators, so sparse communication patterns do not need to be handled only through a full dense matrix path.
+- Floating model state is packed into shared flat buffers in CPU shared memory, which keeps inter-process exchange compact and makes centralized gossip updates efficient when many logical nodes are hosted by a small GPU pool.
+- Non-floating buffers are handled separately from the flat floating state, which keeps the merge path explicit and easier to reason about.
+- Same-step W&B metrics are buffered before upload, reducing logging overhead without redefining the main metric keys or their semantics.
+
 ## Overview
 
 This repository is designed around one shared execution base and two complementary use cases:
@@ -148,6 +167,10 @@ The config launcher is the recommended top-level entrypoint. It normalizes compa
 
 W&B note: the repository logs its own explicit `step` field and binds metrics to that axis. If W&B also shows `_step`, treat `_step` as the internal logging counter and use `step` for training-progress plots.
 
+The repository also logs a derived `round` field, defined as `step // k_steps`. Treat `round` as a communication-round view for interpreting gossip cadence; keep `step` as the primary training-progress axis.
+
+The logged `step` should be read as a per-node local-training progress unit, not as the sum of optimizer steps across all GPUs or all logical nodes. In the current simulator, the shared logging step is synchronized from logical-node progress and follows the slowest node's completed local step.
+
 Paper-oriented launcher:
 
 ```bash
@@ -168,7 +191,7 @@ bash scripts/gpu_monitor.sh
 
 This is useful when simulating many logical nodes on a small number of GPUs, where memory pressure can become substantial even in seemingly modest runs.
 
-For heavier paper-facing and larger many-node presets, the repository now defaults `args.data_loading_workers` to `0` so startup behavior is more predictable across machines. This changes dataloader execution style, not the data definition or training objective.
+For heavier paper-facing and larger many-node presets, the default loader setting still follows the repo-wide `data_loading_workers` value. The runtime divides this worker budget across GPU worker processes, so the effective worker count per process depends on both `data_loading_workers` and `num_GPU`. Adjust it according to available CPU cores, memory headroom, and startup stability. If a machine shows unstable startup behavior or appears to stall during dataloader initialization, try `--set args.data_loading_workers=0` as a compatibility fallback.
 
 ## Shared Installation, Two Entry Paths
 
@@ -281,6 +304,7 @@ The data policy is intentional:
 
 - Main experiments can consume substantial memory; monitor GPU pressure when scaling node count.
 - AMP defaults to `bf16`; if switched to `fp16`, training uses `GradScaler` automatically.
+- Relative to the original paper code, this repository includes implementation improvements such as the current AMP path and `bf16` support. Exact numbers can therefore differ slightly from earlier code snapshots, but the core empirical phenomena, trends, and conclusions of the paper are preserved.
 - `r_start` and `r_end` are interpreted as extra neighbors, excluding self.
 - TinyImageNet preparation now uses the hardened dataset path in `datasets/tinyimagenet.py`; `strict_loading` and `max_failure_ratio` are the main user-facing controls for corrupted-sample handling.
 - The merged-model path reconstructs parameters on the centralized aggregation device and then refreshes BatchNorm statistics through a short calibration pass.
@@ -288,6 +312,7 @@ The data policy is intentional:
 - `data_sampling_mode=fixed` means one weighted subset is drawn once per node; `data_sampling_mode=resample` means the node's class distribution is fixed but concrete sample indices are redrawn over time.
 - For TinyImageNet runs with small images (for example `image_size=64`), the paper-facing default ResNet is `model_name=resnet18_cifar_stem`.
 - If you want a ResNet-18 closer to official torchvision/ImageNet pretrained stem semantics, use `model_name=resnet18_imagenet_stem`.
+- Logged `step` values correspond to synchronized per-node local progress, not total work accumulated over all workers.
 
 For a compact reproduction checklist, see [docs/reproducibility.md](docs/reproducibility.md).
 

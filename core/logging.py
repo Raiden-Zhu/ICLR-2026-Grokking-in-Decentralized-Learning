@@ -22,6 +22,7 @@ def _pop_mergeability_payload(step, avg_test_metrics, avg_model_metrics):
             avg_model["accuracy"] - test_metrics["accuracy"]
         ),
         "step": step,
+        "k_steps": test_metrics.get("k_steps", avg_model.get("k_steps")),
     }
 
 
@@ -30,13 +31,31 @@ def _compute_average_metrics(metrics_by_network):
     avg_accuracy = sum(m["accuracy"] for m in metrics_by_network.values()) / len(
         metrics_by_network
     )
-    return {"loss": avg_loss, "accuracy": avg_accuracy}
+    first_metrics = next(iter(metrics_by_network.values()))
+    return {
+        "loss": avg_loss,
+        "accuracy": avg_accuracy,
+        "k_steps": first_metrics.get("k_steps"),
+    }
+
+
+def _append_round(payload):
+    """Add the communication-round view derived from the explicit simulator step."""
+    step = payload.get("step")
+    k_steps = payload.get("k_steps")
+    if step is None or k_steps is None or int(k_steps) <= 0:
+        return payload
+
+    updated = dict(payload)
+    updated["round"] = int(step) // int(k_steps)
+    return updated
 
 
 
 def _build_buffered_metrics_payload(step, metrics_by_network, prefix, *, include_average):
     """Build one W&B payload for one logical step while keeping metric keys unchanged."""
-    payload = {"step": step}
+    first_metrics = next(iter(metrics_by_network.values()))
+    payload = {"step": step, "k_steps": first_metrics.get("k_steps")}
     for network_idx, metrics in metrics_by_network.items():
         payload[f"{prefix}_loss/network_{network_idx}"] = metrics["loss"]
         payload[f"{prefix}_accuracy/network_{network_idx}"] = metrics["accuracy"]
@@ -78,6 +97,7 @@ def logging_process(log_queue, total_steps, num_nodes):
                 train_metrics_buffer[step][network_idx] = {
                     "loss": log_item["loss"],
                     "accuracy": log_item["accuracy"],
+                    "k_steps": log_item.get("k_steps"),
                 }
 
                 if len(train_metrics_buffer[step]) == num_nodes:
@@ -87,7 +107,7 @@ def logging_process(log_queue, total_steps, num_nodes):
                         "train",
                         include_average=True,
                     )
-                    wandb.log(payload)
+                    wandb.log(_append_round(payload))
                     del train_metrics_buffer[step]
 
             elif log_type == "valid":
@@ -99,6 +119,7 @@ def logging_process(log_queue, total_steps, num_nodes):
                 valid_metrics_buffer[step][network_idx] = {
                     "loss": log_item["loss"],
                     "accuracy": log_item["accuracy"],
+                    "k_steps": log_item.get("k_steps"),
                 }
 
                 if len(valid_metrics_buffer[step]) == num_nodes:
@@ -108,7 +129,7 @@ def logging_process(log_queue, total_steps, num_nodes):
                         "valid",
                         include_average=True,
                     )
-                    wandb.log(payload)
+                    wandb.log(_append_round(payload))
                     del valid_metrics_buffer[step]
 
             elif log_type == "test":
@@ -120,6 +141,7 @@ def logging_process(log_queue, total_steps, num_nodes):
                 test_metrics_buffer[step][network_idx] = {
                     "loss": log_item["loss"],
                     "accuracy": log_item["accuracy"],
+                    "k_steps": log_item.get("k_steps"),
                 }
 
                 if len(test_metrics_buffer[step]) == num_nodes:
@@ -130,26 +152,25 @@ def logging_process(log_queue, total_steps, num_nodes):
                         include_average=False,
                     )
                     avg_test_metrics[step] = _compute_average_metrics(test_metrics_buffer[step])
-                    wandb.log(payload)
+                    wandb.log(_append_round(payload))
                     merged_payload = _pop_mergeability_payload(
                         step,
                         avg_test_metrics,
                         avg_model_metrics,
                     )
                     if merged_payload is not None:
-                        wandb.log(merged_payload)
+                        wandb.log(_append_round(merged_payload))
                     del test_metrics_buffer[step]
 
             elif log_type == "gossip_params":
-                wandb.log(
-                    {
-                        "r": log_item["r"],
-                        "step": log_item["step"],
-                    }
-                )
+                wandb.log(_append_round({"r": log_item["r"], "step": log_item["step"], "k_steps": log_item.get("k_steps")}))
 
             elif log_type == "consensus_error":
-                wandb.log({"consensus_error": log_item["error"], "step": log_item["step"]})
+                wandb.log(
+                    _append_round(
+                        {"consensus_error": log_item["error"], "step": log_item["step"], "k_steps": log_item.get("k_steps")}
+                    )
+                )
 
             elif log_type == "avg_model":
                 step = log_item["step"]
@@ -159,6 +180,7 @@ def logging_process(log_queue, total_steps, num_nodes):
                 avg_model_metrics[step] = {
                     "loss": avg_model_test_loss,
                     "accuracy": avg_model_test_acc,
+                    "k_steps": log_item.get("k_steps"),
                 }
                 merged_payload = _pop_mergeability_payload(
                     step,
@@ -170,30 +192,36 @@ def logging_process(log_queue, total_steps, num_nodes):
 
             elif log_type == "post_merge":
                 wandb.log(
-                    {
-                        "post_merge_round": log_item["post_merge_round"],
-                        "post_merge_avg_test_accuracy": log_item["post_merge_avg_test_accuracy"],
-                        "post_merge_avg_test_loss": log_item["post_merge_avg_test_loss"],
-                        "post_merge_avg_model_test_accuracy": log_item["post_merge_avg_model_test_accuracy"],
-                        "post_merge_avg_model_test_loss": log_item["post_merge_avg_model_test_loss"],
-                        "post_merge_consensus_error": log_item["post_merge_consensus_error"],
-                        "step": log_item["step"],
-                    }
+                    _append_round(
+                        {
+                            "post_merge_round": log_item["post_merge_round"],
+                            "post_merge_avg_test_accuracy": log_item["post_merge_avg_test_accuracy"],
+                            "post_merge_avg_test_loss": log_item["post_merge_avg_test_loss"],
+                            "post_merge_avg_model_test_accuracy": log_item["post_merge_avg_model_test_accuracy"],
+                            "post_merge_avg_model_test_loss": log_item["post_merge_avg_model_test_loss"],
+                            "post_merge_consensus_error": log_item["post_merge_consensus_error"],
+                            "step": log_item["step"],
+                            "k_steps": log_item.get("k_steps"),
+                        }
+                    )
                 )
 
             elif log_type == "post_merge_final":
                 wandb.log(
-                    {
-                        "avg_test_accuracy": log_item["avg_test_accuracy"],
-                        "avg_test_loss": log_item["avg_test_loss"],
-                        "avg_model_test_accuracy": log_item["avg_model_test_accuracy"],
-                        "avg_model_test_loss": log_item["avg_model_test_loss"],
-                        "avg_model_test_accuracy - avg_test_accuracy": log_item[
-                            "avg_model_test_accuracy - avg_test_accuracy"
-                        ],
-                        "consensus_error": log_item["consensus_error"],
-                        "step": log_item["step"],
-                    }
+                    _append_round(
+                        {
+                            "avg_test_accuracy": log_item["avg_test_accuracy"],
+                            "avg_test_loss": log_item["avg_test_loss"],
+                            "avg_model_test_accuracy": log_item["avg_model_test_accuracy"],
+                            "avg_model_test_loss": log_item["avg_model_test_loss"],
+                            "avg_model_test_accuracy - avg_test_accuracy": log_item[
+                                "avg_model_test_accuracy - avg_test_accuracy"
+                            ],
+                            "consensus_error": log_item["consensus_error"],
+                            "step": log_item["step"],
+                            "k_steps": log_item.get("k_steps"),
+                        }
+                    )
                 )
 
         except queue.Empty:

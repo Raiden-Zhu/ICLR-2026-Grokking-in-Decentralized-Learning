@@ -115,6 +115,12 @@ def main():
             deprecation_warnings.append(message)
 
     python_cmd = run_cfg.get("python", sys.executable)
+    if run_cfg.get("python") == "python3" and Path(sys.executable).name != "python3":
+        print(
+            "[Warning] Config requested 'python3', which may bypass the active virtual environment; "
+            "prefer omitting run.python or setting it explicitly to the desired interpreter.",
+            file=sys.stderr,
+        )
     entry = run_cfg.get("entry", "main_multi_GPU.py")
     entry_path = (REPO_ROOT / entry).resolve()
 

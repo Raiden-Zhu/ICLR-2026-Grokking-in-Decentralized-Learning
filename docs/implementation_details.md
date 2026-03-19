@@ -155,6 +155,24 @@ For older commands and YAMLs, the repository still keeps a narrow compatibility 
 
 This compatibility layer exists to keep old configs runnable while making the active implementation boundary clearer.
 
+## Runtime and Logging Notes
+
+A few practical details are useful when reading results from the current codebase:
+
+- training and evaluation move tensors to device with non-blocking transfers where supported; this affects execution efficiency, not the learning rule
+- the worker loop uses `optimizer.zero_grad(set_to_none=True)`; this reduces redundant memory traffic without changing optimizer step order
+- launcher aliases such as `num_gpus`/`num_GPU` and `non_iid`/`nonIID` are normalized into one canonical runtime view before training starts
+- CIFAR-10, CIFAR-100, and TinyImageNet share the same dataset-finalization structure, while preserving split policy, transforms, calibration-view semantics, and the existing 6-tuple return contract
+- same-step W&B logging is batched before upload, while preserving metric keys, aggregation rules, and step alignment
+
+For interpretation purposes, the intended invariants are:
+
+- the training mathematical formulation remains unchanged
+- node-data semantics remain unchanged, including the `data_sampling_mode=resample` stream behavior used by paper-facing runs
+- metric meaning, key names, and step semantics remain unchanged
+
+The lightweight check `scripts/run_targeted_regression_checks.sh` is available if you want to verify launcher and dataset-path consistency in a local environment.
+
 ## Practical Note on Non-Floating State
 
 The current shared-memory implementation gives the cleanest semantics to the final merged-model parameters. Non-floating buffers are handled separately, and non-parameter training state remains outside the merge path.

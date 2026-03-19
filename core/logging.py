@@ -6,26 +6,36 @@ import wandb
 from tqdm import tqdm
 
 
-def _try_log_mergeability_gap(step, avg_test_metrics, avg_model_metrics):
-    """Log merged-model gain once both averaged local and merged metrics are available."""
+def _pop_mergeability_payload(step, avg_test_metrics, avg_model_metrics):
+    """Return one merged payload once both averaged local and merged metrics are available."""
     if step not in avg_test_metrics or step not in avg_model_metrics:
-        return False
+        return None
 
-    wandb.log(
-        {
-            "avg_model_test_accuracy - avg_test_accuracy": (
-                avg_model_metrics[step]["accuracy"] - avg_test_metrics[step]["accuracy"]
-            ),
-            "step": step,
-        }
+    test_metrics = avg_test_metrics.pop(step)
+    avg_model = avg_model_metrics.pop(step)
+    return {
+        "avg_test_accuracy": test_metrics["accuracy"],
+        "avg_test_loss": test_metrics["loss"],
+        "avg_model_test_accuracy": avg_model["accuracy"],
+        "avg_model_test_loss": avg_model["loss"],
+        "avg_model_test_accuracy - avg_test_accuracy": (
+            avg_model["accuracy"] - test_metrics["accuracy"]
+        ),
+        "step": step,
+    }
+
+
+def _compute_average_metrics(metrics_by_network):
+    avg_loss = sum(m["loss"] for m in metrics_by_network.values()) / len(metrics_by_network)
+    avg_accuracy = sum(m["accuracy"] for m in metrics_by_network.values()) / len(
+        metrics_by_network
     )
-    del avg_test_metrics[step]
-    del avg_model_metrics[step]
-    return True
+    return {"loss": avg_loss, "accuracy": avg_accuracy}
 
 
-def _flush_buffered_metrics(step, metrics_by_network, prefix, *, include_average):
-    """Emit one W&B record for one logical step while keeping metric keys unchanged."""
+
+def _build_buffered_metrics_payload(step, metrics_by_network, prefix, *, include_average):
+    """Build one W&B payload for one logical step while keeping metric keys unchanged."""
     payload = {"step": step}
     for network_idx, metrics in metrics_by_network.items():
         payload[f"{prefix}_loss/network_{network_idx}"] = metrics["loss"]
@@ -33,16 +43,11 @@ def _flush_buffered_metrics(step, metrics_by_network, prefix, *, include_average
 
     average_metrics = None
     if include_average:
-        avg_loss = sum(m["loss"] for m in metrics_by_network.values()) / len(metrics_by_network)
-        avg_accuracy = sum(m["accuracy"] for m in metrics_by_network.values()) / len(
-            metrics_by_network
-        )
-        payload[f"avg_{prefix}_loss"] = avg_loss
-        payload[f"avg_{prefix}_accuracy"] = avg_accuracy
-        average_metrics = {"loss": avg_loss, "accuracy": avg_accuracy}
+        average_metrics = _compute_average_metrics(metrics_by_network)
+        payload[f"avg_{prefix}_loss"] = average_metrics["loss"]
+        payload[f"avg_{prefix}_accuracy"] = average_metrics["accuracy"]
 
-    wandb.log(payload)
-    return average_metrics
+    return payload, average_metrics
 
 
 def logging_process(log_queue, total_steps, num_nodes):
@@ -76,12 +81,13 @@ def logging_process(log_queue, total_steps, num_nodes):
                 }
 
                 if len(train_metrics_buffer[step]) == num_nodes:
-                    _flush_buffered_metrics(
+                    payload, _ = _build_buffered_metrics_payload(
                         step,
                         train_metrics_buffer[step],
                         "train",
                         include_average=True,
                     )
+                    wandb.log(payload)
                     del train_metrics_buffer[step]
 
             elif log_type == "valid":
@@ -96,12 +102,13 @@ def logging_process(log_queue, total_steps, num_nodes):
                 }
 
                 if len(valid_metrics_buffer[step]) == num_nodes:
-                    _flush_buffered_metrics(
+                    payload, _ = _build_buffered_metrics_payload(
                         step,
                         valid_metrics_buffer[step],
                         "valid",
                         include_average=True,
                     )
+                    wandb.log(payload)
                     del valid_metrics_buffer[step]
 
             elif log_type == "test":
@@ -116,14 +123,21 @@ def logging_process(log_queue, total_steps, num_nodes):
                 }
 
                 if len(test_metrics_buffer[step]) == num_nodes:
-                    average_metrics = _flush_buffered_metrics(
+                    payload, _ = _build_buffered_metrics_payload(
                         step,
                         test_metrics_buffer[step],
                         "test",
-                        include_average=True,
+                        include_average=False,
                     )
-                    avg_test_metrics[step] = average_metrics
-                    _try_log_mergeability_gap(step, avg_test_metrics, avg_model_metrics)
+                    avg_test_metrics[step] = _compute_average_metrics(test_metrics_buffer[step])
+                    wandb.log(payload)
+                    merged_payload = _pop_mergeability_payload(
+                        step,
+                        avg_test_metrics,
+                        avg_model_metrics,
+                    )
+                    if merged_payload is not None:
+                        wandb.log(merged_payload)
                     del test_metrics_buffer[step]
 
             elif log_type == "gossip_params":
@@ -142,18 +156,17 @@ def logging_process(log_queue, total_steps, num_nodes):
                 avg_model_test_acc = log_item["test_accuracy"]
                 avg_model_test_loss = log_item["test_loss"]
 
-                wandb.log(
-                    {
-                        "avg_model_test_accuracy": avg_model_test_acc,
-                        "avg_model_test_loss": avg_model_test_loss,
-                        "step": step,
-                    }
-                )
                 avg_model_metrics[step] = {
                     "loss": avg_model_test_loss,
                     "accuracy": avg_model_test_acc,
                 }
-                _try_log_mergeability_gap(step, avg_test_metrics, avg_model_metrics)
+                merged_payload = _pop_mergeability_payload(
+                    step,
+                    avg_test_metrics,
+                    avg_model_metrics,
+                )
+                if merged_payload is not None:
+                    wandb.log(merged_payload)
 
             elif log_type == "post_merge":
                 wandb.log(

@@ -144,6 +144,12 @@ def print_runtime_layout(num_nodes: int, layout: RuntimeLayout) -> None:
     print(f"{'='*60}\n")
 
 
+def _configure_wandb_step_metric(run):
+    """Bind all logged metrics to the explicit simulator step axis."""
+    run.define_metric("step")
+    run.define_metric("*", step_metric="step")
+
+
 def initialize_wandb_run(
     *,
     project_name: str,
@@ -223,6 +229,7 @@ def initialize_wandb_run(
             "post_merge_rounds": post_merge_rounds,
         },
     )
+    _configure_wandb_step_metric(run)
     run.name = "_".join(
         [f"{key}={val}" for key, val in run.config.items() if key != "dataset_name"]
     )

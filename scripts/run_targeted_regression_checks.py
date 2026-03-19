@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Lightweight regression checks for recent safe refactors."""
+"""Lightweight regression checks for safe refactors."""
 
 import inspect
+import queue
+import yaml
 from pathlib import Path
 
 from torch.utils.data import Dataset
 
+import core.logging as logging_module
 from core.entrypoint import build_main_argument_parser, normalize_main_kwargs
 from datasets.common import DatasetView, build_split_dataset_views, finalize_classification_dataset
 from datasets.cifar10 import load_cifar10
@@ -129,9 +132,111 @@ def maybe_check_real_datasets():
         print("[SKIP] TinyImageNet cache not found locally")
 
 
+def check_config_launcher_defaults():
+    config_paths = sorted((ROOT_DIR / "configs").glob("**/*.yaml"))
+    hardcoded_python3 = []
+    for path in config_paths:
+        data = yaml.safe_load(path.read_text()) or {}
+        if data.get("run", {}).get("python") == "python3":
+            hardcoded_python3.append(path.relative_to(ROOT_DIR).as_posix())
+
+    assert_true(
+        not hardcoded_python3,
+        f"Configs must not hardcode run.python=python3: {hardcoded_python3!r}",
+    )
+    print("[OK] Config launcher interpreter defaults")
+
+
+def check_logging_step_alignment():
+    recorded_payloads = []
+
+    class DummyTqdm:
+        def __init__(self, *args, **kwargs):
+            self.total = kwargs.get("total")
+
+        def update(self, _n):
+            return None
+
+        def close(self):
+            return None
+
+    original_log = logging_module.wandb.log
+    original_tqdm = logging_module.tqdm
+    try:
+        logging_module.wandb.log = lambda payload: recorded_payloads.append(dict(payload))
+        logging_module.tqdm = DummyTqdm
+
+        log_queue = queue.Queue()
+        items = [
+            {"type": "train", "network_idx": 0, "loss": 1.0, "accuracy": 10.0, "step": 100, "k_steps": 50},
+            {"type": "train", "network_idx": 1, "loss": 3.0, "accuracy": 30.0, "step": 100, "k_steps": 50},
+            {"type": "valid", "network_idx": 0, "loss": 1.5, "accuracy": 15.0, "step": 100},
+            {"type": "valid", "network_idx": 1, "loss": 2.5, "accuracy": 25.0, "step": 100},
+            {"type": "test", "network_idx": 0, "loss": 4.0, "accuracy": 40.0, "step": 100},
+            {"type": "avg_model", "test_accuracy": 65.0, "test_loss": 1.2, "step": 100},
+            {"type": "test", "network_idx": 1, "loss": 2.0, "accuracy": 60.0, "step": 100},
+        ]
+        for item in items:
+            log_queue.put(item)
+        log_queue.put(None)
+
+        logging_module.logging_process(log_queue, total_steps=1000, num_nodes=2)
+    finally:
+        logging_module.wandb.log = original_log
+        logging_module.tqdm = original_tqdm
+
+    train_payload = next((p for p in recorded_payloads if "avg_train_accuracy" in p), None)
+    valid_payload = next((p for p in recorded_payloads if "avg_valid_accuracy" in p), None)
+    test_payload = next((p for p in recorded_payloads if "test_accuracy/network_0" in p), None)
+    merged_payload = next(
+        (
+            p for p in recorded_payloads
+            if "avg_test_accuracy" in p and "avg_model_test_accuracy" in p
+        ),
+        None,
+    )
+    gap_only_payloads = [
+        p for p in recorded_payloads
+        if set(p.keys()) == {"avg_model_test_accuracy - avg_test_accuracy", "step"}
+    ]
+    standalone_avg_model_payloads = [
+        p for p in recorded_payloads
+        if "avg_model_test_accuracy" in p and "avg_test_accuracy" not in p
+    ]
+
+    assert_true(train_payload is not None, "Train payload must be emitted")
+    assert_true(valid_payload is not None, "Valid payload must be emitted")
+    assert_true(test_payload is not None, "Per-node test payload must be emitted")
+    assert_true(merged_payload is not None, "Merged avg-test/avg-model payload must be emitted")
+    assert_true(train_payload["step"] == 100, f"Train step drifted: {train_payload!r}")
+    assert_true(valid_payload["step"] == 100, f"Valid step drifted: {valid_payload!r}")
+    assert_true(test_payload["step"] == 100, f"Test step drifted: {test_payload!r}")
+    assert_true(merged_payload["step"] == 100, f"Merged payload step drifted: {merged_payload!r}")
+    assert_true(
+        "avg_test_accuracy" not in test_payload,
+        f"Per-node test payload should not duplicate avg test metrics: {test_payload!r}",
+    )
+    assert_true(
+        merged_payload["avg_model_test_accuracy - avg_test_accuracy"] == 15.0,
+        f"Unexpected mergeability gap payload: {merged_payload!r}",
+    )
+    assert_true(
+        not gap_only_payloads,
+        f"Gap metric must not be emitted as a standalone payload: {gap_only_payloads!r}",
+    )
+    assert_true(
+        not standalone_avg_model_payloads,
+        f"Avg-model metrics must not be emitted without the matching avg-test payload: {standalone_avg_model_payloads!r}",
+    )
+
+    print("[OK] Logging step alignment and mergeability payloads")
+
+
 def main_check():
     check_cli_and_normalization()
     check_shared_dataset_helpers()
+    check_config_launcher_defaults()
+    check_logging_step_alignment()
     maybe_check_real_datasets()
     print("TARGETED_REGRESSION_CHECKS_OK")
 

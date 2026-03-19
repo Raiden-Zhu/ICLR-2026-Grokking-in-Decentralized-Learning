@@ -1,11 +1,8 @@
 run:
   entry: main_multi_GPU.py
-  python: python3
-
 env:
   HF_HOME: ./cache/hf_home
   OPENCLIP_CACHE_DIR: ./cache/hf_home
-
 args:
   dataset_path: datasets/downloads
   dataset_name: tinyimagenet

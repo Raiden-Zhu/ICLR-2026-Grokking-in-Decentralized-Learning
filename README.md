@@ -130,13 +130,23 @@ Preflight validation:
 bash scripts/preflight.sh
 ```
 
+Optional consistency check:
+
+```bash
+bash scripts/run_targeted_regression_checks.sh
+```
+
+This lightweight check verifies that the launcher argument mapping, classification-dataset loader structure, and shared dataset helper behavior remain aligned with the documented workflow.
+
 Smoke test via config:
 
 ```bash
 python3 scripts/run_with_config.py --config configs/examples/smoke_test_1gpu_1000steps.yaml
 ```
 
-The config launcher is the recommended top-level entrypoint. It normalizes compatibility aliases such as `num_gpus`/`num_GPU` and `non_iid`/`nonIID` before invoking the training entry.
+The config launcher is the recommended top-level entrypoint. It normalizes compatibility aliases such as `num_gpus`/`num_GPU` and `non_iid`/`nonIID` before invoking the training entry. On larger presets, a short pause before the first visible training progress can be normal because dataset and dataloader setup happens up front.
+
+W&B note: the repository logs its own explicit `step` field and binds metrics to that axis. If W&B also shows `_step`, treat `_step` as the internal logging counter and use `step` for training-progress plots.
 
 Paper-oriented launcher:
 
@@ -157,6 +167,8 @@ bash scripts/gpu_monitor.sh
 ```
 
 This is useful when simulating many logical nodes on a small number of GPUs, where memory pressure can become substantial even in seemingly modest runs.
+
+For heavier paper-facing and larger many-node presets, the repository now defaults `args.data_loading_workers` to `0` so startup behavior is more predictable across machines. This changes dataloader execution style, not the data definition or training objective.
 
 ## Shared Installation, Two Entry Paths
 
@@ -190,7 +202,7 @@ At a high level, the simulator currently works as follows:
 4. Run evaluation only at the explicit scheduled checkpoints.
 5. Optionally run post-merge gossip rounds and reconstruct the final convergence model on the centralized aggregation device.
 
-The barrier protocol for publish, aggregate, reload, and evaluation is kept explicit in the code so refactors do not silently change training-time synchronization semantics.
+The barrier protocol for publish, aggregate, reload, and evaluation is kept explicit in the code so the training-time synchronization semantics remain easy to inspect.
 
 For implementation-level interpretation of gossip versus global averaging, see [docs/implementation_details.md](docs/implementation_details.md).
 
@@ -213,6 +225,7 @@ The [scripts](scripts) directory is intentionally small and operational. It is b
 - [scripts/bootstrap_env.sh](scripts/bootstrap_env.sh): bootstrap a local Python environment and install dependencies.
 - [scripts/setup_env.sh](scripts/setup_env.sh): load environment variables from local env files using restricted `KEY=VALUE` parsing; cache locations get safe defaults, while external endpoints such as `HF_ENDPOINT` must be chosen explicitly.
 - [scripts/preflight.sh](scripts/preflight.sh): basic checks before a long run.
+- [scripts/run_targeted_regression_checks.sh](scripts/run_targeted_regression_checks.sh): lightweight consistency check for launcher normalization and dataset-loader structure.
 - [scripts/run_with_config.py](scripts/run_with_config.py): the main config-driven launcher.
 - [scripts/run_main_experiment.sh](scripts/run_main_experiment.sh): thin wrapper around the paper-oriented config.
 - [scripts/run_smoke_test.sh](scripts/run_smoke_test.sh): quick sanity check entry.

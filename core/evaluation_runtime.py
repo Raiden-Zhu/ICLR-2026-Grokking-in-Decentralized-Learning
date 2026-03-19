@@ -81,7 +81,7 @@ def evaluate_local_models(
     local_networks,
     valid_dataloaders_list,
     test_dataloader,
-    local_steps_completed,
+    evaluation_step,
     log_queue,
 ):
     """Evaluate local models after one centralized gossip/broadcast round."""
@@ -89,7 +89,7 @@ def evaluate_local_models(
         valid_result = evaluate_network(
             local_networks[local_idx],
             valid_dataloaders_list[local_idx],
-            local_steps_completed[local_idx],
+            evaluation_step,
             global_idx,
             "valid",
         )
@@ -98,7 +98,7 @@ def evaluate_local_models(
         test_result = evaluate_network(
             local_networks[local_idx],
             test_dataloader,
-            local_steps_completed[local_idx],
+            evaluation_step,
             global_idx,
             "test",
         )

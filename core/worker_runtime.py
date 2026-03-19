@@ -115,13 +115,13 @@ def train_local_models_for_round(
     local_schedulers,
     train_dataloaders_list,
     local_steps_completed,
-    log_queue,
     autocast_enabled,
     autocast_dtype,
     scaler,
 ):
     """Run one local optimization round before the centralized gossip step."""
     communication_round_steps = int(config.k_steps)
+    round_train_metrics = []
 
     for local_idx, global_idx in enumerate(local_node_indices):
         if local_steps_completed[local_idx] >= config.max_steps:
@@ -195,15 +195,29 @@ def train_local_models_for_round(
 
         mean_train_loss /= executed_steps
         train_accuracy = 100 * correct_train / total_train if total_train else 0.0
-
-        log_queue.put(
+        round_train_metrics.append(
             {
-                "type": "train",
                 "network_idx": global_idx,
                 "loss": mean_train_loss,
                 "accuracy": train_accuracy,
-                "step": local_steps_completed[local_idx],
                 "k_steps": executed_steps,
+            }
+        )
+
+    return round_train_metrics
+
+
+def emit_train_round_metrics(log_queue, round_train_metrics, step):
+    """Log one round of local-train metrics under the shared reference step."""
+    for metrics in round_train_metrics:
+        log_queue.put(
+            {
+                "type": "train",
+                "network_idx": metrics["network_idx"],
+                "loss": metrics["loss"],
+                "accuracy": metrics["accuracy"],
+                "step": step,
+                "k_steps": metrics["k_steps"],
             }
         )
 
@@ -380,7 +394,6 @@ def run_optional_evaluation_phase(
     valid_dataloaders_list,
     test_dataloader,
     calibration_loader,
-    local_steps_completed,
     log_queue,
     shared_state_pool,
     shared_reference_step,
@@ -392,12 +405,13 @@ def run_optional_evaluation_phase(
     if not bool(shared_should_eval.value):
         return
 
+    evaluation_step = int(shared_reference_step.value)
     evaluate_local_models(
         local_node_indices,
         local_networks,
         valid_dataloaders_list,
         test_dataloader,
-        local_steps_completed,
+        evaluation_step,
         log_queue,
     )
     if rank == 0:

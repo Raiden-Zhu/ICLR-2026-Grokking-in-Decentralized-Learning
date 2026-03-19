@@ -38,7 +38,7 @@ The current implementation follows this sequence:
 6. Run evaluation only when the explicit shared evaluation schedule says so; that schedule is anchored to the slowest logical node's completed local step rather than to one fixed worker-local node.
 7. Repeat until the per-node training budget is exhausted.
 
-This means the node-level learning rule is preserved, while the execution is packed onto fewer GPUs. The publish / aggregate / reload / evaluate boundaries are kept explicit in the implementation so that refactors do not silently change the synchronization protocol.
+This means the node-level learning rule is preserved, while the execution is packed onto fewer GPUs. The publish / aggregate / reload / evaluate boundaries are kept explicit in the implementation so the synchronization protocol remains easy to inspect.
 
 ## What "Simulation" Means Here
 

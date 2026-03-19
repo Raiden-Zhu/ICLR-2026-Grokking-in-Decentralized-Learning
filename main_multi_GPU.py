@@ -23,6 +23,7 @@ from core.model_runtime import (
 from core.worker_runtime import (
     create_amp_runtime,
     create_model_from_config,
+    emit_train_round_metrics,
     get_local_node_indices,
     initialize_local_training_state,
     initialize_next_eval_step,
@@ -234,7 +235,7 @@ def worker_process(
     calibration_loader = calibration_loader_data
 
     while max(local_steps_completed) < config.max_steps:
-        train_local_models_for_round(
+        round_train_metrics = train_local_models_for_round(
             config,
             device,
             local_node_indices,
@@ -243,7 +244,6 @@ def worker_process(
             local_schedulers,
             train_dataloaders_list,
             local_steps_completed,
-            log_queue,
             autocast_enabled,
             autocast_dtype,
             scaler,
@@ -283,6 +283,7 @@ def worker_process(
         # Phase 3 barrier: rank 0 has finished writing the updated shared target buffer.
         barrier.wait()
 
+        emit_train_round_metrics(log_queue, round_train_metrics, int(shared_reference_step.value))
         load_broadcast_parameters(local_node_indices, local_networks, shared_state_pool, device)
 
         # Phase 4 barrier: each worker has reloaded the centrally aggregated parameters.
@@ -296,7 +297,6 @@ def worker_process(
             valid_dataloaders_list=valid_dataloaders_list,
             test_dataloader=test_dataloader,
             calibration_loader=calibration_loader,
-            local_steps_completed=local_steps_completed,
             log_queue=log_queue,
             shared_state_pool=shared_state_pool,
             shared_reference_step=shared_reference_step,

@@ -48,7 +48,15 @@ python3 scripts/run_with_config.py --config configs/examples/smoke_test_1gpu_100
 
 This is the safest first run because it checks the dataset path, launcher path, and basic training loop before a longer experiment. The launcher also normalizes compatibility aliases such as `num_gpus`/`num_GPU` and `non_iid`/`nonIID` before dispatching to the training entrypoint.
 
-### 3. Launch a paper-oriented run
+### 3. Run the lightweight regression checks
+
+```bash
+bash scripts/run_targeted_regression_checks.sh
+```
+
+This script is a lightweight consistency check for the current workflow. It checks CLI-to-main argument compatibility, normalized runtime kwargs, shared dataset helper behavior, and the current 6-tuple structure returned by classification dataset loaders.
+
+### 4. Launch a paper-oriented run
 
 Use one of the current paper-facing presets:
 
@@ -67,6 +75,10 @@ or
 python3 scripts/run_with_config.py --config configs/paper/default_multi_gpu.yaml
 ```
 
+Practical note:
+
+- On large multi-node presets, the very beginning of a run can look briefly stalled while dataset objects and dataloaders are being prepared. This startup pause is expected and does not by itself indicate a training failure.
+
 ## Current Preset Roles
 
 ### Paper-oriented presets
@@ -74,6 +86,7 @@ python3 scripts/run_with_config.py --config configs/paper/default_multi_gpu.yaml
 - configs/paper/run_main_experiment.yaml: thin wrapper target for the main experiment launcher
 - configs/paper/default_multi_gpu.yaml: baseline multi-GPU preset with larger node count and post-merge rounds
 - both paper presets use `data_sampling_mode=resample`
+- both paper presets set `args.data_loading_workers=0` by default so large runs start more predictably across environments; changing it later is a runtime tuning choice rather than a change to the data or training objective
 
 ### Example presets
 
@@ -85,6 +98,7 @@ python3 scripts/run_with_config.py --config configs/paper/default_multi_gpu.yaml
 - configs/examples/figure1_single_merge_resnet18.yaml: figure-oriented paper preset for the single final merge phenomenon, uses `data_sampling_mode=resample`
 - configs/examples/figure2_dense_window_resnet18.yaml: figure-oriented paper preset for a temporary dense communication window, uses `data_sampling_mode=resample`
 - configs/examples/topology_exponential_random.yaml: isolates the behavior of structured random communication
+- all heavier example presets except the smoke test and the 1-GPU/8-node demo now set `args.data_loading_workers=0` by default, prioritizing stable startup behavior over loader parallelism
 
 ## Key Logged Metrics
 
@@ -103,6 +117,12 @@ How to interpret them:
 - `avg_model_test_accuracy - avg_test_accuracy` is a convenient derived summary of that gap and is useful as a compact mergeability indicator.
 - This is the repository counterpart of the paper's counterfactual merged-model analysis.
 
+W&B axis note:
+
+- The repository logs an explicit `step` field for train, valid, test, mergeability, topology, and consensus metrics. This is the simulator's shared reference step and is the reader-facing x-axis.
+- W&B also maintains its own internal `_step`, but `_step` only counts logging events. It is not the training step definition used by this repository.
+- When reading curves in W&B, use the logged `step` field as the x-axis rather than `_step`.
+
 ## Reproducing Paper-Style Phenomena
 
 ### Single final merge phenomenon, Figure 1 style
@@ -110,6 +130,11 @@ How to interpret them:
 Recommended preset:
 
 - configs/examples/figure1_single_merge_resnet18.yaml
+
+Loader note:
+
+- This preset sets `args.data_loading_workers=0` by default to keep startup behavior predictable across environments. If you increase it later, treat that as a runtime tuning change rather than a paper-facing semantic change.
+- The same default now applies to the other heavier reader-facing presets for the same reason.
 
 Sampling note:
 
@@ -237,3 +262,4 @@ A standard run can produce the following artifacts:
 - Increase node count only after confirming memory headroom.
 - Treat post-merge rounds as part of the experimental design, not as a universal default.
 - Use scripts/gpu_monitor.sh when exploring larger many-node simulations, since CPU and GPU memory pressure can rise quickly.
+- If you update launcher options or classification-dataset loading paths, rerun `bash scripts/run_targeted_regression_checks.sh` before longer experiments.
